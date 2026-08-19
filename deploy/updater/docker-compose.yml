@@ -1,0 +1,37 @@
+# Run the Argus core together with the argus-updater sidecar, wired for one-click self-update.
+#
+# The core (public-facing) never gets the Docker socket. The updater (not web-facing) holds it and
+# performs core updates on request via the shared `argus-update` volume. An admin clicks "Update now"
+# in Settings; the updater pulls the newest release, recreates the core cloning its config, verifies
+# it comes up healthy, and rolls back on failure.
+#
+# Fill in .env (see argus/README.md for the full env-var table) then:  docker compose up -d
+services:
+  argus:
+    image: ghcr.io/g-guglielmi/argus:${ARGUS_TAG:-latest}
+    container_name: argus            # the updater targets this name (ARGUS_CORE_CONTAINER below)
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - argus-data:/data             # SQLite + at-rest encryption keyfile (private to the core)
+      - argus-update:/update         # self-update channel, shared with argus-updater only
+    environment:
+      ARGUS_UPDATE_DIR: /update      # enables the "Update now" button
+    env_file:
+      - .env                         # ARGUS_ZABBIX_API_URL/TOKEN, ARGUS_SECRET_KEY, ARGUS_PUBLIC_URL, ...
+
+  argus-updater:
+    image: ghcr.io/g-guglielmi/argus-updater:${ARGUS_UPDATER_TAG:-latest}
+    container_name: argus-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # host-level: pull + recreate the core. NOT web-facing.
+      - argus-update:/update                        # same channel volume as the core
+    environment:
+      ARGUS_CORE_CONTAINER: argus
+      ARGUS_CORE_IMAGE: ghcr.io/g-guglielmi/argus
+
+volumes:
+  argus-data:
+  argus-update:

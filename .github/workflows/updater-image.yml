@@ -1,0 +1,64 @@
+name: updater-image
+
+# Builds & pushes the argus-updater sidecar image (ghcr.io/<owner>/argus-updater). This is the small,
+# socket-holding helper that performs Argus *core* self-updates on the core's behalf (see
+# deploy/updater/). It is our own tiny Alpine image with no upstream-version coupling, so - unlike the
+# probe image - it just rebuilds when its sources change. It carries no app semver: it's a stable tool,
+# published as :latest (+ :sha), and the core it updates is versioned independently via build.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/updater/**'
+  workflow_dispatch:
+
+permissions:
+  packages: write   # push the image to GHCR
+
+concurrency:
+  group: updater-image
+  cancel-in-progress: false
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so git describe can stamp the build
+
+      - name: Compute version
+        id: version
+        run: echo "value=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/argus-updater
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./deploy/updater
+          file: ./deploy/updater/Dockerfile
+          push: true
+          build-args: |
+            UPDATER_VERSION=${{ steps.version.outputs.value }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
