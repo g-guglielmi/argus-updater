@@ -170,6 +170,13 @@ do_update() {
   log "$NAME updated to $NEW_IMAGE"
 }
 
+# The non-root, distroless core creates request.json in this shared dir, but a fresh Docker named
+# volume mounts root-owned 0755 - which the core cannot write, so it could never queue (or dismiss)
+# an update. We hold the socket and run as root, so make the channel writable by the core here.
+# Self-heals existing volumes on restart; the dir only ever holds the tiny request/status JSON.
+mkdir -p "$UPDATE_DIR"
+chmod 0777 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DIR (core may be unable to queue updates)"
+
 log "watching $REQUEST (core=$CORE_CONTAINER, poll ${INTERVAL}s)"
 LAST_ID=""
 while true; do
