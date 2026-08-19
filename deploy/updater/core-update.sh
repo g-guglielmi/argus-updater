@@ -106,8 +106,18 @@ do_update() {
     return
   fi
   REPO=$(printf '%s' "$CUR_IMAGE" | sed 's/:[^:/]*$//')   # strip the tag, keep the repo
-  NEW_IMAGE="$REPO:$TAG"
-  log "$NAME  $CUR_IMAGE -> $NEW_IMAGE"
+  # Preserve the core's release CHANNEL. If it runs a rolling tag (:latest / :testing), re-pull that
+  # same tag in place so it keeps tracking the channel (pulling gets the newer image); only a pinned
+  # version (:vX.Y.Z) is bumped to the requested release. This keeps the latest/testing model intact
+  # instead of dropping a channel deployment onto a fixed version.
+  CUR_TAG=$(printf '%s' "$CUR_IMAGE" | sed -n 's#.*:\([^:/]*\)$#\1#p')
+  [ -z "$CUR_TAG" ] && CUR_TAG="latest"
+  case "$CUR_TAG" in
+    latest|testing) TARGET_TAG="$CUR_TAG" ;;
+    *)              TARGET_TAG="$TAG" ;;
+  esac
+  NEW_IMAGE="$REPO:$TARGET_TAG"
+  log "$NAME  $CUR_IMAGE -> $NEW_IMAGE (target version $TAG)"
 
   write_status running "pulling $NEW_IMAGE"
   if ! docker pull "$NEW_IMAGE"; then
