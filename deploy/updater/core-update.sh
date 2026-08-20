@@ -106,16 +106,23 @@ do_update() {
     return
   fi
   REPO=$(printf '%s' "$CUR_IMAGE" | sed 's/:[^:/]*$//')   # strip the tag, keep the repo
-  # Preserve the core's release CHANNEL. If it runs a rolling tag (:latest / :testing), re-pull that
-  # same tag in place so it keeps tracking the channel (pulling gets the newer image); only a pinned
-  # version (:vX.Y.Z) is bumped to the requested release. This keeps the latest/testing model intact
-  # instead of dropping a channel deployment onto a fixed version.
-  CUR_TAG=$(printf '%s' "$CUR_IMAGE" | sed -n 's#.*:\([^:/]*\)$#\1#p')
-  [ -z "$CUR_TAG" ] && CUR_TAG="latest"
-  case "$CUR_TAG" in
-    latest|testing) TARGET_TAG="$CUR_TAG" ;;
-    *)              TARGET_TAG="$TAG" ;;
-  esac
+  # Two modes:
+  #  - EXACT=true (a deliberate channel/version switch from the GUI): converge on the requested TAG
+  #    verbatim, so the operator can move latest <-> testing <-> a pinned vX.Y.Z on purpose.
+  #  - otherwise (a plain in-place update): preserve the core's release CHANNEL. A rolling tag
+  #    (:latest / :testing) is re-pulled in place so it keeps tracking the channel (the pull gets the
+  #    newer image); only a genuinely pinned version is bumped to the requested release. This keeps
+  #    the latest/testing model intact instead of accidentally dropping a channel onto a fixed version.
+  if [ "$EXACT" = "true" ]; then
+    TARGET_TAG="$TAG"
+  else
+    CUR_TAG=$(printf '%s' "$CUR_IMAGE" | sed -n 's#.*:\([^:/]*\)$#\1#p')
+    [ -z "$CUR_TAG" ] && CUR_TAG="latest"
+    case "$CUR_TAG" in
+      latest|testing) TARGET_TAG="$CUR_TAG" ;;
+      *)              TARGET_TAG="$TAG" ;;
+    esac
+  fi
   NEW_IMAGE="$REPO:$TARGET_TAG"
   log "$NAME  $CUR_IMAGE -> $NEW_IMAGE (target version $TAG)"
 
@@ -195,6 +202,7 @@ while true; do
     if [ -n "$ID" ] && [ "$ID" != "$LAST_ID" ]; then
       TAG=$(jq -r '.tag // empty' "$REQUEST" 2>/dev/null || true)
       FROM=$(jq -r '.from // empty' "$REQUEST" 2>/dev/null || true)
+      EXACT=$(jq -r '.exact // false' "$REQUEST" 2>/dev/null || true)   # deliberate switch: use TAG verbatim
       # Guard against re-running a job we already finished (e.g. after a sidecar restart): if a status
       # for this id is already terminal, skip it.
       PRIOR_STATE=""
