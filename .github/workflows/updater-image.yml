@@ -30,7 +30,9 @@ jobs:
 
       - name: Compute version
         id: version
-        run: echo "value=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+        # Match only app release tags (v*), never probe/* tags, so the updater reports the app
+        # release line rather than a stray probe version.
+        run: echo "value=$(git describe --tags --match 'v*' --always --dirty)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
