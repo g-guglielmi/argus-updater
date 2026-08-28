@@ -5,8 +5,9 @@
 # itself. This sidecar holds the socket instead. It watches a directory shared with the core
 # (ARGUS_UPDATE_DIR, default /update) for a request the core drops when an admin clicks "Update now":
 #
-#   request.json (core writes) -> {id, tag, from, requested_by, requested_at, core_container}
-#   status.json  (we write)    -> {id, state:"running|success|failed", from, to, message, started_at, finished_at}
+#   request.json    (core writes) -> {id, tag, from, requested_by, requested_at, core_container}
+#   status.json     (we write)    -> {id, state:"running|success|failed", from, to, message, started_at, finished_at}
+#   core-image.json (we write)    -> {image, tag}  the tag the core runs under, so it knows its channel
 #
 # For each new request it: pulls the target image; recreates the core container cloning its config
 # (Binds/Mounts, env, restart policy, network, labels, ports) and swapping only the image tag; verifies
@@ -21,6 +22,7 @@ SOCK=/var/run/docker.sock
 UPDATE_DIR="${ARGUS_UPDATE_DIR:-/update}"
 REQUEST="$UPDATE_DIR/request.json"
 STATUS="$UPDATE_DIR/status.json"
+CORE_IMAGE_FILE="$UPDATE_DIR/core-image.json"
 CORE_CONTAINER="${ARGUS_CORE_CONTAINER:-argus}"
 CORE_IMAGE="${ARGUS_CORE_IMAGE:-ghcr.io/g-guglielmi/argus}"
 INTERVAL="${ARGUS_UPDATE_INTERVAL:-10}"
@@ -85,6 +87,22 @@ verify() {
     sleep 3
   done
   return 1
+}
+
+# report_core_image - tell the core which image tag it is running under, written to the shared dir the
+# core reads. This is the core's authoritative channel signal: a clean release image is byte-identical
+# on :latest and :testing, so the core can't self-identify its channel right after a release - but we
+# hold the socket and can read its Config.Image. Cheap (one inspect); refreshed every poll so it tracks
+# the tag across a recreate/redeploy. Best-effort: any failure just leaves the last report in place.
+report_core_image() {
+  _name=$(resolve_core 2>/dev/null || true)
+  [ -z "$_name" ] && return 0
+  _img=$(api GET "/containers/$_name/json" 2>/dev/null | jq -r '.Config.Image // empty' 2>/dev/null || true)
+  [ -z "$_img" ] && return 0
+  _tag=$(printf '%s' "$_img" | sed -n 's#.*:\([^:/]*\)$#\1#p')
+  [ -z "$_tag" ] && _tag="latest"
+  jq -nc --arg img "$_img" --arg tag "$_tag" '{image:$img, tag:$tag}' \
+     > "$CORE_IMAGE_FILE.tmp" 2>/dev/null && mv "$CORE_IMAGE_FILE.tmp" "$CORE_IMAGE_FILE" 2>/dev/null || true
 }
 
 # do_update - run one update job end to end, writing status as it goes.
@@ -195,8 +213,10 @@ mkdir -p "$UPDATE_DIR"
 chmod 0777 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DIR (core may be unable to queue updates)"
 
 log "watching $REQUEST (core=$CORE_CONTAINER, poll ${INTERVAL}s)"
+report_core_image   # tell the core its running tag/channel right away, before the first poll
 LAST_ID=""
 while true; do
+  report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
   if [ -f "$REQUEST" ]; then
     ID=$(jq -r '.id // empty' "$REQUEST" 2>/dev/null || true)
     if [ -n "$ID" ] && [ "$ID" != "$LAST_ID" ]; then
