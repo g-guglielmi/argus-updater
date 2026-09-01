@@ -1,10 +1,10 @@
 name: updater-image
 
 # Builds & pushes the argus-updater sidecar image (ghcr.io/<owner>/argus-updater), the small
-# socket-holding helper that performs Argus *core* self-updates (see deploy/updater/). It rebuilds
-# when its sources change, publishing :latest (+ :sha). A vX.Y.Z tag additionally publishes a
-# version-pinned image (:X.Y.Z, :X.Y) and a GitHub Release, so a deployment can pin an updater version
-# instead of tracking :latest.
+# socket-holding helper that recreates a target container on a new image - used by BOTH the Argus
+# core and the argus-probe proxies (see deploy/updater/). It rebuilds when its sources change,
+# publishing :latest (+ :sha). A vX.Y.Z tag additionally publishes a version-pinned image (:X.Y.Z,
+# :X.Y) and a GitHub Release, so a deployment can pin an updater version instead of tracking :latest.
 
 on:
   push:
@@ -74,7 +74,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: |
-            **argus-updater ${{ github.ref_name }}** — the Argus core self-update sidecar.
+            **argus-updater ${{ github.ref_name }}** — the shared socket-holding self-update
+            sidecar for the Argus core and the argus-probe proxies.
 
             Pull `ghcr.io/${{ github.repository_owner }}/argus-updater:${{ github.ref_name }}`
-            (version-pinned) or `:latest`. See the README for the compose wiring.
+            (version-pinned) or `:latest`. See the README for modes + wiring.

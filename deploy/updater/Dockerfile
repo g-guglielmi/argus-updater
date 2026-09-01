@@ -1,12 +1,15 @@
-# argus-updater: the socket-holding sidecar that performs Argus *core* self-updates on the core's
-# behalf. The public-facing core never gets the Docker socket; this small, non-web-facing helper does.
+# argus-updater: one socket-holding sidecar that recreates a target container on a new image, shared
+# by BOTH the Argus core and the argus-probe proxies. The public-facing core (and the outbound-only
+# probes) never hold the Docker socket; this small, non-web-facing helper does.
 #
-# It watches a directory shared with the core (ARGUS_UPDATE_DIR, e.g. /update): when the core drops a
-# request.json (an admin clicked "Update now"), it pulls the target image, recreates the core container
-# cloning its config, verifies the new container stays healthy, rolls back on failure, and writes the
-# outcome back to status.json so the core can show a banner.
+# The recreate engine (pull -> clone the running config -> verify healthy -> roll back on failure) is
+# one library used by every mode, so the core and probe update paths can never drift. Pick a mode
+# with ARGUS_UPDATER_MODE (default: core):
+#   core            watch the shared /update dir and recreate the CORE on an admin's "Update now".
+#   probe-recreate  one-shot: recreate the argus-probe PROXY on a new image, then exit.
+#   probe-poll      compose sidecar: poll Argus for the fleet target and converge the proxy.
 #
-# Run it alongside the core (see deploy/core/docker-compose.yml):
+# Core deployment (see deploy/updater/docker-compose.yml):
 #   docker run -d --name argus-updater --restart unless-stopped \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v argus-update:/update \
@@ -14,16 +17,20 @@
 #     ghcr.io/g-guglielmi/argus-updater:latest
 FROM alpine:3.20
 
-# docker-cli: pull + talk to the Engine API. curl: Engine API over the unix socket + a best-effort
-# /healthz probe of the new core. jq: read/write the JSON channel files.
-RUN apk add --no-cache curl jq docker-cli
+# docker-cli: pull + talk to the Engine API. docker-cli-compose: the `docker compose` plugin the
+# probe-poll mode drives. curl: Engine API over the unix socket + a best-effort /healthz probe. jq:
+# read/write the JSON channel files.
+RUN apk add --no-cache curl jq docker-cli docker-cli-compose
 
 # Bake the image version so it can be surfaced later if needed; "dev" for local builds.
 ARG UPDATER_VERSION=dev
 RUN echo "$UPDATER_VERSION" > /etc/argus-updater.version
 LABEL io.argus.updater.version=$UPDATER_VERSION
 
-COPY core-update.sh /usr/local/bin/argus-core-update.sh
-RUN chmod +x /usr/local/bin/argus-core-update.sh
+# The dispatcher + the shared engine and per-mode scripts.
+COPY entrypoint.sh /usr/local/bin/argus-updater
+COPY lib/   /usr/local/lib/argus-updater/lib/
+COPY modes/ /usr/local/lib/argus-updater/modes/
+RUN chmod +x /usr/local/bin/argus-updater
 
-ENTRYPOINT ["/usr/local/bin/argus-core-update.sh"]
+ENTRYPOINT ["/usr/local/bin/argus-updater"]
