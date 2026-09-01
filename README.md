@@ -1,3 +1,5 @@
+<p align="center"><img src="argus-logo.png" alt="Argus" width="110"></p>
+
 # argus-updater
 
 The self-update sidecar for [Argus](https://github.com/g-guglielmi/argus-core). A small
