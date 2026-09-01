@@ -17,8 +17,12 @@ UPDATE_DIR="${ARGUS_UPDATE_DIR:-/update}"
 REQUEST="$UPDATE_DIR/request.json"
 STATUS="$UPDATE_DIR/status.json"
 CORE_IMAGE_FILE="$UPDATE_DIR/core-image.json"
+UPDATER_FILE="$UPDATE_DIR/updater.json"            # we report OUR (sidecar) version here
+UPDATER_REQUEST="$UPDATE_DIR/updater-request.json"  # the core drops this to update US
 CORE_CONTAINER="${ARGUS_CORE_CONTAINER:-argus}"
 CORE_IMAGE="${ARGUS_CORE_IMAGE:-ghcr.io/g-guglielmi/argus}"
+UPDATER_REPO="${ARGUS_UPDATER_REPO:-ghcr.io/g-guglielmi/argus-updater}"
+UPDATER_VERSION="$(cat /etc/argus-updater.version 2>/dev/null || echo dev)"
 INTERVAL="${ARGUS_UPDATE_INTERVAL:-10}"
 
 # The core is web-facing: accept a passing /healthz as proof of health, on top of stability.
@@ -65,6 +69,31 @@ report_core_image() {
   _tag=$(image_tag "$_img"); [ -z "$_tag" ] && _tag="latest"
   jq -nc --arg img "$_img" --arg tag "$_tag" '{image:$img, tag:$tag}' \
      > "$CORE_IMAGE_FILE.tmp" 2>/dev/null && mv "$CORE_IMAGE_FILE.tmp" "$CORE_IMAGE_FILE" 2>/dev/null || true
+}
+
+# report_updater - tell the core our own (sidecar) version, so Settings can show it + offer an update.
+report_updater() {
+  jq -nc --arg v "$UPDATER_VERSION" '{version:$v}' \
+     > "$UPDATER_FILE.tmp" 2>/dev/null && mv "$UPDATER_FILE.tmp" "$UPDATER_FILE" 2>/dev/null || true
+}
+
+# check_updater_request - the core drops updater-request.json to update the sidecar itself. We can't
+# rm -f ourselves, so spawn an ephemeral --rm copy in probe-recreate mode targeting our own container.
+# Consume the request BEFORE spawning so the recreated (new) sidecar never re-runs it.
+check_updater_request() {
+  [ -f "$UPDATER_REQUEST" ] || return 0
+  _uid=$(jq -r '.id // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
+  [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
+  _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
+  _self=$(cat /etc/hostname)
+  log "updater self-update to $_utag requested (id $_uid) - spawning ephemeral recreate helper"
+  rm -f "$UPDATER_REQUEST"
+  docker run -d --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -e ARGUS_UPDATER_MODE=probe-recreate \
+    -e ARGUS_RECREATE_TARGET="$_self" \
+    -e ARGUS_RECREATE_TAG="$_utag" \
+    "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn the updater self-update helper"
 }
 
 # do_update - run one update job end to end, writing status as it goes.
@@ -118,9 +147,12 @@ chmod 0777 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DI
 
 log "watching $REQUEST (core=$CORE_CONTAINER, poll ${INTERVAL}s)"
 report_core_image   # tell the core its running tag/channel right away, before the first poll
+report_updater      # ...and our own sidecar version
 LAST_ID=""
 while true; do
   report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
+  report_updater      # keep our reported sidecar version current
+  check_updater_request   # act on a "update the sidecar" request from the core
   if [ -f "$REQUEST" ]; then
     ID=$(jq -r '.id // empty' "$REQUEST" 2>/dev/null || true)
     if [ -n "$ID" ] && [ "$ID" != "$LAST_ID" ]; then
