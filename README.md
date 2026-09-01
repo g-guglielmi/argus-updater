@@ -12,6 +12,8 @@ needs to hold the Docker socket itself.
 
 Triggered from the core's **Settings → update** flow (see argus-core).
 
+**Versioning:** a rolling `:latest` (tracks `main`) plus version-pinned images (`:X.Y.Z`, `:X.Y`) and a GitHub Release cut from each `vX.Y.Z` tag — pin a version in production if you'd rather not track `:latest`.
+
 ## Roadmap
 
 Generalize this into one updater used by **both** the core and probes — replacing the probe image's
