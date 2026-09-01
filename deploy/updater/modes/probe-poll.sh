@@ -40,20 +40,29 @@ while true; do
       -d "$(jq -nc '{version:"", selfupdate:true}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
+    UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
 
-    if [ -n "$TARGET" ]; then
-      # "latest" maps to the rolling tag; a pin (e.g. 7.0.29-r1) maps to itself.
-      TAG="latest"
-      [ "$TARGET" != "latest" ] && TAG="$TARGET"
+    # A dashboard "Update now" (the one-shot .update) forces a pull+recreate even at the same tag (so
+    # a rolling :latest picks up a newer digest); otherwise converge on the fleet target by tag.
+    # "latest" maps to the rolling tag; a pin (e.g. 7.0.29-r1) maps to itself.
+    TAG=""; FORCE=0
+    if [ -n "$UPDATE" ]; then
+      TAG="latest"; [ "$UPDATE" != "latest" ] && TAG="$UPDATE"; FORCE=1
+    elif [ -n "$TARGET" ]; then
+      TAG="latest"; [ "$TARGET" != "latest" ] && TAG="$TARGET"
+    fi
+
+    if [ -n "$TAG" ]; then
       CUR=$(sed -n 's/^ARGUS_PROBE_TAG=//p' "$ENV_FILE" 2>/dev/null || true)
-
-      if [ "$TAG" != "$CUR" ]; then
-        echo "argus-updater[poll]: fleet target=$TARGET (tag $TAG) differs from current '${CUR:-unset}' - updating proxy"
+      if [ "$FORCE" = "1" ] || [ "$TAG" != "$CUR" ]; then
+        echo "argus-updater[poll]: converging proxy to tag $TAG (current '${CUR:-unset}', force=$FORCE)"
         touch "$ENV_FILE"
         grep -v -E '^ARGUS_PROBE_TAG=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
         echo "ARGUS_PROBE_TAG=$TAG" >> "$ENV_FILE.tmp"
         mv "$ENV_FILE.tmp" "$ENV_FILE"
-        # Recreate only the proxy service (not this sidecar, so it can't kill itself mid-update).
+        # Recreate only the proxy service (not this sidecar, so it can't kill itself mid-update). A
+        # fresh pull that changes the image digest makes `up -d` recreate; an unchanged digest is a
+        # no-op.
         if docker compose -f "$COMPOSE_FILE" pull proxy && docker compose -f "$COMPOSE_FILE" up -d proxy; then
           echo "argus-updater[poll]: proxy updated to $TAG"
         else

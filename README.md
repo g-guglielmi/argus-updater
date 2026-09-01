@@ -19,12 +19,24 @@ mode keeps working unchanged). The recreate engine is shared, so the paths can n
 | Mode | Lifetime | What it does |
 |------|----------|--------------|
 | `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks **Settings → Update now**. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). |
-| `probe-recreate` | one-shot | Recreate the argus-probe **proxy** on a new image, then exit. Spawned by the proxy as a `--rm` sister container (a container can't `rm -f` itself mid-update). |
-| `probe-poll` | long-running | Opt-in compose sidecar: poll Argus for the fleet target and converge the proxy via `docker compose` (keeps the compose `.env` authoritative). |
+| `probe-recreate` | one-shot | Recreate the argus-probe **proxy** on a new image, then exit. Spawned by the proxy as a `--rm` sister container when the proxy itself holds the socket. |
+| `probe-watch` | long-running | **Socket-holding sidecar for `docker run` proxies (no compose).** Poll Argus and recreate the proxy via the Engine API on a dashboard "Update now" or a target change — so the **proxy stays socket-free**, same as the core. Recommended for docker-run / Dockhand fleets. |
+| `probe-poll` | long-running | Opt-in **compose** sidecar: poll Argus and converge the proxy via `docker compose` (keeps the compose `.env` authoritative). |
 
-The `core` mode is triggered from the core's **Settings → update** flow; the two probe modes are
-driven by the argus-probe image (see that repo). `probe-poll` uses the bundled `docker compose`
-plugin; the other modes talk to the Docker Engine API directly.
+The `core` mode is triggered from the core's **Settings → update** flow; the probe modes are driven
+by Argus fleet updates (see the argus-probe / argus-core repos). `probe-poll` uses the bundled
+`docker compose` plugin; the other modes talk to the Docker Engine API directly.
+
+**probe-watch** — run one alongside each `docker run` proxy (the proxy needs **no** socket):
+
+```bash
+docker run -d --name <proxy>-updater --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v <proxy-data-dir>:/probe:ro \
+  -e ARGUS_UPDATER_MODE=probe-watch \
+  -e ARGUS_PROXY_CONTAINER=<proxy-container-name> \
+  ghcr.io/g-guglielmi/argus-updater:latest
+```
 
 **Versioning:** a rolling `:latest` (tracks `main`) plus version-pinned images (`:X.Y.Z`, `:X.Y`) and a GitHub Release cut from each `vX.Y.Z` tag — pin a version in production if you'd rather not track `:latest`.
 

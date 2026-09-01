@@ -7,6 +7,8 @@
 # with ARGUS_UPDATER_MODE (default: core):
 #   core            watch the shared /update dir and recreate the CORE on an admin's "Update now".
 #   probe-recreate  one-shot: recreate the argus-probe PROXY on a new image, then exit.
+#   probe-watch     socket-holding sidecar (no compose): recreate a docker-run PROXY via the Engine
+#                   API on a fleet update - the proxy stays socket-free.
 #   probe-poll      compose sidecar: poll Argus for the fleet target and converge the proxy.
 #
 # Core deployment (see deploy/updater/docker-compose.yml):
