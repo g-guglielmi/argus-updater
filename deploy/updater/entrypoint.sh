@@ -7,12 +7,10 @@
 #
 #   core            long-running; watch the shared /update dir and recreate the CORE on request
 #                   (dashboard-triggered; /healthz-aware; channel-preserving). [default]
-#   probe-recreate  one-shot; recreate the argus-probe PROXY on a new image, then exit
-#                   (spawned by the proxy as a --rm sister container - socket-on-proxy model).
-#   probe-watch     long-running socket-holding sidecar (NO compose); poll Argus and recreate the
-#                   proxy via the Engine API - the proxy stays socket-free. Best for docker-run.
-#   probe-poll      long-running compose sidecar; poll Argus for the fleet target and converge the
-#                   proxy via `docker compose` (keeps the compose .env authoritative).
+#   probe-watch     long-running socket-holding sidecar; poll Argus and recreate the PROXY via the
+#                   Engine API - the proxy stays socket-free. The one probe updater (run/compose/VM).
+#   probe-recreate  one-shot; recreate a target container on a new image, then exit. The self-update
+#                   primitive a long-running updater uses to recreate ITSELF (a --rm sister).
 set -eu
 
 MODE="${ARGUS_UPDATER_MODE:-core}"
@@ -23,11 +21,10 @@ LIBDIR=/usr/local/lib/argus-updater
 
 case "$MODE" in
   core)           . "$LIBDIR/modes/core.sh" ;;
-  probe-recreate) . "$LIBDIR/modes/probe-recreate.sh" ;;
   probe-watch)    . "$LIBDIR/modes/probe-watch.sh" ;;
-  probe-poll)     . "$LIBDIR/modes/probe-poll.sh" ;;
+  probe-recreate) . "$LIBDIR/modes/probe-recreate.sh" ;;
   *)
-    echo "argus-updater: unknown ARGUS_UPDATER_MODE='$MODE' (want: core | probe-recreate | probe-watch | probe-poll)" >&2
+    echo "argus-updater: unknown ARGUS_UPDATER_MODE='$MODE' (want: core | probe-watch | probe-recreate)" >&2
     exit 2
     ;;
 esac

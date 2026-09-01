@@ -19,15 +19,14 @@ mode keeps working unchanged). The recreate engine is shared, so the paths can n
 | Mode | Lifetime | What it does |
 |------|----------|--------------|
 | `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks **Settings → Update now**. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). |
-| `probe-recreate` | one-shot | Recreate the argus-probe **proxy** on a new image, then exit. Spawned by the proxy as a `--rm` sister container when the proxy itself holds the socket. |
-| `probe-watch` | long-running | **Socket-holding sidecar for `docker run` proxies (no compose).** Poll Argus and recreate the proxy via the Engine API on a dashboard "Update now" or a target change — so the **proxy stays socket-free**, same as the core. Recommended for docker-run / Dockhand fleets. |
-| `probe-poll` | long-running | Opt-in **compose** sidecar: poll Argus and converge the proxy via `docker compose` (keeps the compose `.env` authoritative). |
+| `probe-watch` | long-running | **The probe updater** (run / compose / VM). A socket-holding sidecar that recreates the proxy via the Engine API on a dashboard "Update now" or a target change — so the **proxy stays socket-free**, same as the core. Also updates **itself** on request via the primitive below. |
+| `probe-recreate` | one-shot | Recreate a target container on a new image, then exit. The self-update **primitive**: a long-running updater spawns an ephemeral `--rm` copy of itself in this mode to recreate itself. |
 
-The `core` mode is triggered from the core's **Settings → update** flow; the probe modes are driven
-by Argus fleet updates (see the argus-probe / argus-core repos). `probe-poll` uses the bundled
-`docker compose` plugin; the other modes talk to the Docker Engine API directly.
+Every mode recreates via the **Docker Engine API** (no `docker compose` dependency). The `core` mode
+is triggered from the core's **Settings → update** flow; `probe-watch` is driven by Argus fleet
+updates (see the argus-probe / argus-core repos).
 
-**probe-watch** — run one alongside each `docker run` proxy (the proxy needs **no** socket):
+**probe-watch** — run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash
 docker run -d --name <proxy>-updater --restart unless-stopped \

@@ -27,6 +27,8 @@ META="${ARGUS_PROBE_META:-/probe/enroll/proxy.env}"
 INTERVAL="${ARGUS_UPDATE_INTERVAL:-300}"
 PROXY_CONTAINER="${ARGUS_PROXY_CONTAINER:-}"
 PROBE_IMAGE="${ARGUS_PROBE_IMAGE:-ghcr.io/g-guglielmi/argus-probe}"
+UPDATER_REPO="${ARGUS_UPDATER_REPO:-ghcr.io/g-guglielmi/argus-updater}"
+UPDATER_VERSION="$(cat /etc/argus-updater.version 2>/dev/null || echo dev)"
 RECREATE_NOUN="proxy"
 
 log()      { echo "argus-updater[watch]: $*"; }
@@ -51,11 +53,29 @@ while true; do
   [ -f "$META" ] && { . "$META" 2>/dev/null || true; }
 
   if [ -n "$PROBE_TOKEN" ] && [ -n "$CHECKIN_URL" ]; then
-    # Advertise capability + read the target/one-shot. No version (the proxy reports its own).
+    # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
+    # proxy version (the proxy reports its own); updater_version is our sidecar's own version.
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
-      -d "$(jq -nc '{selfupdate:true}')" "$CHECKIN_URL" 2>/dev/null || echo '')
+      -d "$(jq -nc --arg uv "$UPDATER_VERSION" '{selfupdate:true, updater_version:$uv}')" \
+      "$CHECKIN_URL" 2>/dev/null || echo '')
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
+    UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)
+
+    # Self-update: recreate OURSELVES via an ephemeral --rm copy running probe-recreate against our
+    # own container (we can't rm -f ourselves). The ephemeral helper uses the NEW updater image so it
+    # carries the latest recreate logic; it clones our config (mode, mounts, socket) onto the new tag.
+    if [ -n "$UPDATER_UPDATE" ]; then
+      SELF=$(cat /etc/hostname)
+      log "updater self-update to $UPDATER_UPDATE requested - spawning ephemeral recreate helper"
+      docker run -d --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -e ARGUS_UPDATER_MODE=probe-recreate \
+        -e ARGUS_RECREATE_TARGET="$SELF" \
+        -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" \
+        "$UPDATER_REPO:$UPDATER_UPDATE" >/dev/null 2>&1 \
+        || log "could not spawn the updater self-update helper" >&2
+    fi
 
     NAME=$(resolve_proxy || true)
     if [ -z "$NAME" ]; then
