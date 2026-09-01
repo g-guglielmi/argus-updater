@@ -1,20 +1,22 @@
 name: updater-image
 
-# Builds & pushes the argus-updater sidecar image (ghcr.io/<owner>/argus-updater). This is the small,
-# socket-holding helper that performs Argus *core* self-updates on the core's behalf (see
-# deploy/updater/). It is our own tiny Alpine image with no upstream-version coupling, so - unlike the
-# probe image - it just rebuilds when its sources change. It carries no app semver: it's a stable tool,
-# published as :latest (+ :sha), and the core it updates is versioned independently via build.yml.
+# Builds & pushes the argus-updater sidecar image (ghcr.io/<owner>/argus-updater), the small
+# socket-holding helper that performs Argus *core* self-updates (see deploy/updater/). It rebuilds
+# when its sources change, publishing :latest (+ :sha). A vX.Y.Z tag additionally publishes a
+# version-pinned image (:X.Y.Z, :X.Y) and a GitHub Release, so a deployment can pin an updater version
+# instead of tracking :latest.
 
 on:
   push:
     branches: [main]
     paths:
       - 'deploy/updater/**'
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   packages: write   # push the image to GHCR
+  contents: write   # publish a Release on tag builds
 
 concurrency:
   group: updater-image
@@ -26,12 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so git describe can stamp the build
+          fetch-depth: 0   # full history + tags so git describe can stamp the build
 
       - name: Compute version
         id: version
-        # Match only app release tags (v*), never probe/* tags, so the updater reports the app
-        # release line rather than a stray probe version.
+        # This repo's own vX.Y.Z tags (the updater version line); '--always' falls back to a short
+        # SHA between releases.
         run: echo "value=$(git describe --tags --match 'v*' --always --dirty)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
@@ -50,6 +52,8 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/argus-updater
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
       - name: Build and push
@@ -64,3 +68,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Publish Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            **argus-updater ${{ github.ref_name }}** — the Argus core self-update sidecar.
+
+            Pull `ghcr.io/${{ github.repository_owner }}/argus-updater:${{ github.ref_name }}`
+            (version-pinned) or `:latest`. See the README for the compose wiring.
