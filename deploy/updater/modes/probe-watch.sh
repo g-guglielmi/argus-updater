@@ -67,14 +67,20 @@ while true; do
     # carries the latest recreate logic; it clones our config (mode, mounts, socket) onto the new tag.
     if [ -n "$UPDATER_UPDATE" ]; then
       SELF=$(cat /etc/hostname)
-      log "updater self-update to $UPDATER_UPDATE requested - spawning ephemeral recreate helper"
-      docker run -d --rm \
+      # Name the helper after our own (stable, recreate-preserved) container name and DON'T --rm it, so
+      # its logs survive for inspection (docker logs <name>-selfupdate). Remove any prior one first.
+      _sn=$(api GET "/containers/$SELF/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
+      [ -z "$_sn" ] && _sn="argus-updater"
+      HELPER="${_sn}-selfupdate"
+      log "updater self-update to $UPDATER_UPDATE requested - spawning $HELPER"
+      docker rm -f "$HELPER" >/dev/null 2>&1 || true
+      docker run -d --name "$HELPER" \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -e ARGUS_UPDATER_MODE=probe-recreate \
         -e ARGUS_RECREATE_TARGET="$SELF" \
         -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" \
         "$UPDATER_REPO:$UPDATER_UPDATE" >/dev/null 2>&1 \
-        || log "could not spawn the updater self-update helper" >&2
+        || log "could not spawn $HELPER (check: docker logs $HELPER)"
     fi
 
     NAME=$(resolve_proxy || true)

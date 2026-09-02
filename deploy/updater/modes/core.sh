@@ -86,14 +86,20 @@ check_updater_request() {
   [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
   _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
   _self=$(cat /etc/hostname)
-  log "updater self-update to $_utag requested (id $_uid) - spawning ephemeral recreate helper"
+  # Name the helper after our own (stable) container name and keep it (no --rm) so its logs survive
+  # for inspection. Remove any prior one first.
+  _sn=$(api GET "/containers/$_self/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
+  [ -z "$_sn" ] && _sn="argus-updater"
+  _helper="${_sn}-selfupdate"
+  log "updater self-update to $_utag requested (id $_uid) - spawning $_helper"
   rm -f "$UPDATER_REQUEST"
-  docker run -d --rm \
+  docker rm -f "$_helper" >/dev/null 2>&1 || true
+  docker run -d --name "$_helper" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e ARGUS_UPDATER_MODE=probe-recreate \
     -e ARGUS_RECREATE_TARGET="$_self" \
     -e ARGUS_RECREATE_TAG="$_utag" \
-    "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn the updater self-update helper"
+    "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn $_helper (check: docker logs $_helper)"
 }
 
 # do_update - run one update job end to end, writing status as it goes.

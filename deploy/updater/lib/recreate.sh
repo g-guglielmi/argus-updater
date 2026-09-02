@@ -86,12 +86,20 @@ recreate_container() {
   fi
   log "$NAME  $CUR_IMAGE -> $NEW_IMAGE"
 
+  # Pull with a few retries: a transient registry/network blip must not silently no-op the update
+  # (the pull happens BEFORE we touch the container, so a failure here leaves it running untouched).
   progress "pulling $NEW_IMAGE"
-  if ! docker pull "$NEW_IMAGE"; then
-    RECREATE_ERR="pull of $NEW_IMAGE failed - the $RECREATE_NOUN was left untouched"
-    log "pull failed - the $RECREATE_NOUN untouched"
-    return 1
-  fi
+  _pn=1
+  until docker pull "$NEW_IMAGE"; do
+    if [ "$_pn" -ge 3 ]; then
+      RECREATE_ERR="pull of $NEW_IMAGE failed after 3 attempts - the $RECREATE_NOUN was left untouched"
+      log "pull failed after 3 attempts - the $RECREATE_NOUN untouched"
+      return 1
+    fi
+    log "pull attempt $_pn failed; retrying in 5s"
+    _pn=$(( _pn + 1 ))
+    sleep 5
+  done
 
   # Clone the config, swapping only the image. Keep operator-set Env/Labels/ExposedPorts and the
   # whole HostConfig (binds/mounts, restart policy, network, ports). Drop Cmd/Entrypoint/Hostname so
