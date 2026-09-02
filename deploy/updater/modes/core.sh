@@ -85,18 +85,16 @@ check_updater_request() {
   _uid=$(jq -r '.id // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
   [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
   _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
-  _self=$(cat /etc/hostname)
-  # Name the helper after our own (stable) container name and keep it (no --rm) so its logs survive
-  # for inspection. Remove any prior one first.
+  _self=$(self_container_id)
+  # Name the helper (so `docker logs <name>` reaches it while it runs) but --rm it (auto-removed on
+  # exit - no lingering container). --pull always so it runs the freshest image, never stale code.
   _sn=$(api GET "/containers/$_self/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
   [ -z "$_sn" ] && _sn="argus-updater"
   _helper="${_sn}-selfupdate"
-  log "updater self-update to $_utag requested (id $_uid) - spawning $_helper"
+  log "updater self-update to $_utag requested (id $_uid) - spawning $_helper (target $_self)"
   rm -f "$UPDATER_REQUEST"
   docker rm -f "$_helper" >/dev/null 2>&1 || true
-  # --pull always: run the helper from the freshest image, not the host's cached one (a stale local
-  # image runs OLD helper code - the source of an update-can't-update-itself cycle).
-  docker run -d --name "$_helper" --pull always \
+  docker run -d --rm --name "$_helper" --pull always \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e ARGUS_UPDATER_MODE=probe-recreate \
     -e ARGUS_RECREATE_TARGET="$_self" \

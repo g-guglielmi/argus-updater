@@ -37,6 +37,17 @@ api() {
   fi
 }
 
+# self_container_id - THIS container's own id, resolved robustly. /etc/hostname is NOT reliable (it
+# can be a custom hostname, or inherited from another container when a network namespace is shared).
+# Docker bind-mounts this container's config files (hostname/hosts/resolv.conf) from
+# /var/lib/docker/containers/<full-id>/... , so that id is visible in /proc/self/mountinfo regardless
+# of the hostname. Fall back to /etc/hostname only if that fails.
+self_container_id() {
+  _cid=$(grep -oE 'containers/[0-9a-f]{64}' /proc/self/mountinfo 2>/dev/null | head -n1 | grep -oE '[0-9a-f]{64}')
+  [ -z "$_cid" ] && _cid=$(cat /etc/hostname 2>/dev/null)
+  printf '%s' "$_cid"
+}
+
 # image_repo IMAGE - strip the tag, keep the repo (ghcr.io/x/y:tag -> ghcr.io/x/y).
 image_repo() { printf '%s' "$1" | sed 's/:[^:/]*$//'; }
 # image_tag IMAGE - the tag (ghcr.io/x/y:tag -> tag; empty if none).
