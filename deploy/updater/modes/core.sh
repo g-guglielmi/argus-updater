@@ -94,7 +94,9 @@ check_updater_request() {
   log "updater self-update to $_utag requested (id $_uid) - spawning $_helper"
   rm -f "$UPDATER_REQUEST"
   docker rm -f "$_helper" >/dev/null 2>&1 || true
-  docker run -d --name "$_helper" \
+  # --pull always: run the helper from the freshest image, not the host's cached one (a stale local
+  # image runs OLD helper code - the source of an update-can't-update-itself cycle).
+  docker run -d --name "$_helper" --pull always \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e ARGUS_UPDATER_MODE=probe-recreate \
     -e ARGUS_RECREATE_TARGET="$_self" \

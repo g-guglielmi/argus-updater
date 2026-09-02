@@ -74,7 +74,9 @@ while true; do
       HELPER="${_sn}-selfupdate"
       log "updater self-update to $UPDATER_UPDATE requested - spawning $HELPER"
       docker rm -f "$HELPER" >/dev/null 2>&1 || true
-      docker run -d --name "$HELPER" \
+      # --pull always: run the helper from the freshest image, not the host's cached one - otherwise a
+      # stale local image runs OLD helper code (the source of an update-can't-update-itself cycle).
+      docker run -d --name "$HELPER" --pull always \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -e ARGUS_UPDATER_MODE=probe-recreate \
         -e ARGUS_RECREATE_TARGET="$SELF" \
