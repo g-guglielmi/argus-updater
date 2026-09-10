@@ -11,6 +11,30 @@ outbound-only probes) never need to hold the Docker socket themselves.
 - **`deploy/updater/`** — the `argus-updater` image (`ghcr.io/g-guglielmi/argus-updater`): the shared
   recreate engine (`lib/recreate.sh`), the per-mode scripts (`modes/`), and a compose example.
 
+## How it works
+
+Every Argus-managed unit runs as **two containers**: the **main** container (the core app, or a
+Zabbix proxy) is a pure reporter with **no access to the Docker socket**, and a small
+**argus-updater** sidecar holds the socket and performs the recreate on its behalf — so the
+public-facing core and the outbound-only probes never expose the Docker socket themselves.
+
+```mermaid
+flowchart TB
+  trig["Update trigger<br/>core: Settings &rarr; Update now<br/>probe: fleet update"]
+  reg[("GHCR<br/>new image")]
+  subgraph unit["One Argus unit (host)"]
+    direction LR
+    main["main container<br/>core app or Zabbix proxy<br/>(no Docker socket)"]
+    upd["argus-updater sidecar<br/>(holds /var/run/docker.sock)"]
+  end
+  trig -->|update now| upd
+  reg -.->|pull --always| upd
+  upd ==>|"recreate via Docker Engine API: clone config, start, verify /healthz, roll back on failure"| main
+```
+
+The sidecar updates **itself** the same way — it spawns a throwaway `probe-recreate` copy (see the
+mode below) that recreates it and exits.
+
 ## Modes
 
 One image, picked with `ARGUS_UPDATER_MODE` (default `core`, so an existing core sidecar that sets no
