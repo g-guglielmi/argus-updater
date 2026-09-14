@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 g-guglielmi
+
 # shellcheck shell=sh
 # argus-updater - mode: probe-watch (opt-in socket-holding sidecar; NO compose).
 #

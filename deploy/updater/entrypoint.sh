@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 g-guglielmi
+
 # argus-updater dispatcher: one socket-holding image, several modes.
 #
 # The recreate engine (pull -> clone-config -> verify -> rollback) is shared by every mode so the
