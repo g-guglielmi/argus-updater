@@ -67,3 +67,10 @@ docker run -d --name <proxy>-updater --restart unless-stopped \
 
 - **[argus-core](https://github.com/g-guglielmi/argus-core)** — the app it updates.
 - **[argus-probe](https://github.com/g-guglielmi/argus-probe)** — the monitoring probe (image + VM) whose proxies it also updates.
+
+## License
+
+Argus is free software licensed under the **GNU Affero General Public License v3.0**
+(see [`LICENSE`](LICENSE)). Source: <https://github.com/g-guglielmi/argus-updater>
+
+Copyright (C) 2026 g-guglielmi
