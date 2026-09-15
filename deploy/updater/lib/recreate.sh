@@ -86,6 +86,64 @@ verify() {
   return 1
 }
 
+# --- container config cloning (pure: take the inspect JSON, emit request bodies; unit-tested) ---
+
+# user_nets INSPECT -> the user-defined networks the container is attached to, one per line. The
+# default bridge / host / none pseudo-networks carry no preservable endpoint config (static IP / MAC
+# / aliases) and are handled by HostConfig.NetworkMode, so they are excluded here.
+user_nets() {
+  printf '%s' "$1" | jq -r '(.NetworkSettings.Networks // {}) | keys[]?
+    | select(test("^(default|bridge|host|none)$") | not)'
+}
+
+# primary_net INSPECT -> the network attached at create time: HostConfig.NetworkMode when it names a
+# user-defined network the container is on, else the first user network (empty if none).
+primary_net() {
+  _nm=$(printf '%s' "$1" | jq -r '.HostConfig.NetworkMode // "default"')
+  _un=$(user_nets "$1")
+  if printf '%s\n' "$_un" | grep -Fxq -- "$_nm"; then printf '%s' "$_nm"; else printf '%s\n' "$_un" | head -n1; fi
+}
+
+# endpoint_cfg INSPECT NET -> the create-time EndpointConfig for one network: only operator-set /
+# stable fields (static IP, MAC, aliases, links, driver opts); runtime state (the assigned IPAddress,
+# gateway, ids) is stripped so Docker accepts it.
+endpoint_cfg() {
+  printf '%s' "$1" | jq --arg n "$2" '
+    .NetworkSettings.Networks[$n] as $e
+    | {
+        IPAMConfig: ($e.IPAMConfig | if type == "object" then with_entries(select(.value != null and .value != "")) else null end),
+        Aliases: $e.Aliases, MacAddress: $e.MacAddress, Links: $e.Links, DriverOpts: $e.DriverOpts
+      }
+    | with_entries(select(.value != null and .value != "" and .value != [] and .value != {}))'
+}
+
+# build_create_body NEW_IMAGE INSPECT -> the POST /containers/create body: the running container's
+# config with only the image swapped. Keeps operator Env/Labels/ExposedPorts and the whole HostConfig
+# (binds/mounts, restart policy, ports); preserves an operator-set Hostname/Domainname and the primary
+# network's endpoint - the static IP / MAC / aliases live in NetworkSettings.Networks, NOT HostConfig,
+# so a plain clone loses them (extra networks are connected after create). An AUTO hostname (Docker
+# sets it to the short id when the operator gave none: Config.Hostname == Id[0:12]) is dropped so the
+# new container gets its own id, which the updater's self-update wants.
+build_create_body() {
+  _img="$1"; _ins="$2"
+  _prim=$(primary_net "$_ins")
+  _net=null
+  if [ -n "$_prim" ]; then
+    _net=$(jq -n --arg n "$_prim" --argjson ep "$(endpoint_cfg "$_ins" "$_prim")" '{EndpointsConfig: {($n): $ep}}')
+  fi
+  printf '%s' "$_ins" | jq --arg img "$_img" --argjson net "$_net" '
+    {
+      Image: $img,
+      Env: .Config.Env,
+      Labels: (.Config.Labels // {}),
+      ExposedPorts: .Config.ExposedPorts,
+      HostConfig: .HostConfig
+    }
+    + (if (.Config.Hostname // "") != "" and (.Config.Hostname != (.Id[0:12])) then {Hostname: .Config.Hostname} else {} end)
+    + (if (.Config.Domainname // "") != "" then {Domainname: .Config.Domainname} else {} end)
+    + (if $net != null then {NetworkingConfig: $net} else {} end)'
+}
+
 # recreate_container NAME NEW_IMAGE - the full pull -> clone-config recreate -> verify -> rollback
 # dance. Returns 0 on success, or 1 with RECREATE_ERR set (and the previous container restored).
 recreate_container() {
@@ -115,54 +173,9 @@ recreate_container() {
     sleep 5
   done
 
-  # Per-network endpoint settings (static IP, MAC, aliases) live under NetworkSettings.Networks, NOT
-  # in HostConfig - so a plain HostConfig clone reconnects the container to its network but with an
-  # auto-assigned IP/MAC and no aliases. Reconstruct them for the user-defined networks the container
-  # is on. The default bridge / host / none modes carry no preservable endpoint config and fall
-  # through to HostConfig.NetworkMode as before.
-  NETMODE=$(printf '%s' "$INSPECT" | jq -r '.HostConfig.NetworkMode // "default"')
-  USER_NETS=$(printf '%s' "$INSPECT" | jq -r '
-    (.NetworkSettings.Networks // {}) | keys[]?
-    | select(test("^(default|bridge|host|none)$") | not)')
-  if printf '%s\n' "$USER_NETS" | grep -Fxq -- "$NETMODE"; then
-    PRIMARY="$NETMODE"
-  else
-    PRIMARY=$(printf '%s\n' "$USER_NETS" | head -n1)
-  fi
-
-  # endpoint_cfg NET -> the create-time EndpointConfig for one network: only operator-set / stable
-  # fields (static IP, MAC, aliases, links, driver opts), with runtime state (assigned IPAddress,
-  # gateway, ids) stripped so Docker doesn't reject them.
-  endpoint_cfg() {
-    printf '%s' "$INSPECT" | jq --arg n "$1" '
-      .NetworkSettings.Networks[$n] as $e
-      | {
-          IPAMConfig: ($e.IPAMConfig | if type == "object" then with_entries(select(.value != null and .value != "")) else null end),
-          Aliases: $e.Aliases, MacAddress: $e.MacAddress, Links: $e.Links, DriverOpts: $e.DriverOpts
-        }
-      | with_entries(select(.value != null and .value != "" and .value != [] and .value != {}))'
-  }
-
-  # Clone the config, swapping only the image. Keep operator-set Env/Labels/ExposedPorts and the
-  # whole HostConfig (binds/mounts, restart policy, network, ports). Preserve an operator-set
-  # Hostname/Domainname and the primary network's endpoint (extra networks are connected after
-  # create, below). Docker sets Hostname to the short id when the operator gave none - detect that
-  # (== Id[0:12]) and drop it so the new container gets its own id, as the updater's self-update wants.
-  NETCFG=null
-  if [ -n "$PRIMARY" ]; then
-    NETCFG=$(jq -n --arg n "$PRIMARY" --argjson ep "$(endpoint_cfg "$PRIMARY")" '{EndpointsConfig: {($n): $ep}}')
-  fi
-  CREATE_BODY=$(printf '%s' "$INSPECT" | jq --arg img "$NEW_IMAGE" --argjson net "$NETCFG" '
-    {
-      Image: $img,
-      Env: .Config.Env,
-      Labels: (.Config.Labels // {}),
-      ExposedPorts: .Config.ExposedPorts,
-      HostConfig: .HostConfig
-    }
-    + (if (.Config.Hostname // "") != "" and (.Config.Hostname != (.Id[0:12])) then {Hostname: .Config.Hostname} else {} end)
-    + (if (.Config.Domainname // "") != "" then {Domainname: .Config.Domainname} else {} end)
-    + (if $net != null then {NetworkingConfig: $net} else {} end)')
+  # Clone the running config, swapping only the image (see build_create_body: preserves the network
+  # endpoint's static IP / MAC / aliases and an operator hostname, which a plain HostConfig clone drops).
+  CREATE_BODY=$(build_create_body "$NEW_IMAGE" "$INSPECT")
 
   rollback() {
     log "rolling back to the previous $RECREATE_NOUN"
@@ -188,9 +201,10 @@ recreate_container() {
   # Attach any ADDITIONAL user networks (create only attached the primary), each with its own
   # preserved endpoint (static IP / MAC / aliases). Connect while still stopped so the container
   # starts already on every network. A failed connect rolls back rather than start half-networked.
-  for _n in $USER_NETS; do
-    [ "$_n" = "$PRIMARY" ] && continue
-    _body=$(jq -n --arg c "$NEWID" --argjson ep "$(endpoint_cfg "$_n")" '{Container: $c, EndpointConfig: $ep}')
+  _primary=$(primary_net "$INSPECT")
+  for _n in $(user_nets "$INSPECT"); do
+    [ "$_n" = "$_primary" ] && continue
+    _body=$(jq -n --arg c "$NEWID" --argjson ep "$(endpoint_cfg "$INSPECT" "$_n")" '{Container: $c, EndpointConfig: $ep}')
     _err=$(api POST "/networks/$_n/connect" "$_body" | jq -r '.message // empty')
     if [ -n "$_err" ]; then
       api DELETE "/containers/$NEWID?force=true" >/dev/null 2>&1 || true
