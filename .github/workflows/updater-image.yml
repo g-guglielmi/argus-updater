@@ -23,7 +23,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Guards the config-clone recreate logic (static IP / MAC / aliases / hostname must survive an
+  # image swap). Pure shell + jq against fixture docker-inspect JSON - no daemon needed. The image
+  # build depends on it, so a regression here never reaches :latest.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: recreate config-clone test
+        run: bash deploy/updater/test/recreate_test.sh
+
   docker:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
