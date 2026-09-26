@@ -87,7 +87,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: |
-            **argus-updater ${{ github.ref_name }}** — the shared socket-holding self-update
+            **argus-updater ${{ github.ref_name }}** - the shared socket-holding self-update
             sidecar for the Argus core and the argus-probe proxies.
 
             Pull `ghcr.io/${{ github.repository_owner }}/argus-updater:${{ github.ref_name }}`
