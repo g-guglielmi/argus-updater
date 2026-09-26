@@ -4,7 +4,8 @@ name: updater-image
 # socket-holding helper that recreates a target container on a new image - used by BOTH the Argus
 # core and the argus-probe proxies (see deploy/updater/). It rebuilds when its sources change,
 # publishing :latest (+ :sha). A vX.Y.Z tag additionally publishes a version-pinned image (:X.Y.Z,
-# :X.Y) and a GitHub Release, so a deployment can pin an updater version instead of tracking :latest.
+# :X.Y) and a GitHub Release whose notes are the matching CHANGELOG.md section, so a deployment can
+# pin an updater version instead of tracking :latest.
 
 on:
   push:
@@ -49,6 +50,28 @@ jobs:
         # SHA between releases.
         run: echo "value=$(git describe --tags --match 'v*' --always --dirty)" >> "$GITHUB_OUTPUT"
 
+      # Tag builds publish the CHANGELOG.md section for this version as the Release notes. Checked
+      # before the build so a missing section fails fast and never pushes a version-pinned image.
+      - name: Extract changelog section (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { flag=1; print; next }
+            flag && /^## \[/ { flag=0 }
+            flag { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No CHANGELOG section found for ${VERSION}" >&2
+            exit 1
+          fi
+          {
+            echo
+            echo "Pull \`ghcr.io/${{ github.repository_owner }}/argus-updater:${GITHUB_REF_NAME}\`"
+            echo "(version-pinned) or \`:latest\`. See the README for modes + wiring."
+          } >> RELEASE_NOTES.md
+          echo "----- release notes -----"; cat RELEASE_NOTES.md
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -86,9 +109,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            **argus-updater ${{ github.ref_name }}** - the shared socket-holding self-update
-            sidecar for the Argus core and the argus-probe proxies.
-
-            Pull `ghcr.io/${{ github.repository_owner }}/argus-updater:${{ github.ref_name }}`
-            (version-pinned) or `:latest`. See the README for modes + wiring.
+          name: argus-updater ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md

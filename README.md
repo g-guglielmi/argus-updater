@@ -61,7 +61,7 @@ docker run -d --name <proxy>-updater --restart unless-stopped \
   ghcr.io/g-guglielmi/argus-updater:latest
 ```
 
-**Versioning:** a rolling `:latest` (tracks `main`) plus version-pinned images (`:X.Y.Z`, `:X.Y`) and a GitHub Release cut from each `vX.Y.Z` tag - pin a version in production if you'd rather not track `:latest`.
+**Versioning:** a rolling `:latest` (tracks `main`) plus version-pinned images (`:X.Y.Z`, `:X.Y`) and a GitHub Release cut from each `vX.Y.Z` tag - pin a version in production if you'd rather not track `:latest`. What changed in each release is in [CHANGELOG.md](CHANGELOG.md), which also feeds the Release notes (add the version's section before tagging - the tag build fails without it).
 
 ## Related
 
