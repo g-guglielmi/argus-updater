@@ -67,7 +67,7 @@ jobs:
           fi
           {
             echo
-            echo "Pull \`ghcr.io/${{ github.repository_owner }}/argus-updater:${GITHUB_REF_NAME}\`"
+            echo "Pull \`ghcr.io/${{ github.repository_owner }}/argus-updater:${VERSION}\`"
             echo "(version-pinned) or \`:latest\`. See the README for modes + wiring."
           } >> RELEASE_NOTES.md
           echo "----- release notes -----"; cat RELEASE_NOTES.md
