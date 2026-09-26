@@ -13,8 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-26
+
+### Added
+- A changelog (this file) that now feeds the GitHub Release notes.
+
 ### Changed
-- Maintenance: test and documentation tidy-ups.
+- Maintenance: test and documentation tidy-ups. No change to the updater's behaviour.
 
 ## [0.2.4] - 2026-09-15
 
