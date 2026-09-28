@@ -63,6 +63,38 @@ valid_tag() {
   [ "${#1}" -le 64 ]
 }
 
+# valid_digest DIGEST - the shape of a content digest the core hands out with a tag.
+valid_digest() { case "$1" in sha256:????????????????????????????????????????????????????????????????) case "$1" in *[!a-f0-9:]*) return 1;; esac; return 0;; *) return 1;; esac; }
+
+# pull_verified IMAGE [DIGEST] - docker pull with retries, then, when a digest was handed out with
+# the tag, check the pulled image's repository digest against it. Tags stay tags (latest, testing,
+# a version); the digest is what the core saw the tag point to when it handed it out, so an image
+# swapped under the tag in between is refused, not run. Returns 1 with PULL_ERR set on failure.
+pull_verified() {
+  _img="$1"; _want="${2:-}"
+  PULL_ERR=""
+  _pn=1
+  until docker pull "$_img"; do
+    if [ "$_pn" -ge 3 ]; then PULL_ERR="pull of $_img failed after 3 attempts"; return 1; fi
+    log "pull attempt $_pn failed; retrying in 5s"
+    _pn=$(( _pn + 1 ))
+    sleep 5
+  done
+  if [ -z "$_want" ]; then
+    log "no digest was handed out for $_img; applying the tag unverified"
+    return 0
+  fi
+  if ! valid_digest "$_want"; then PULL_ERR="the digest handed out for $_img is malformed"; return 1; fi
+  _repo=$(image_repo "$_img")
+  if api GET "/images/$_img/json" | jq -e --arg d "$_repo@$_want" '.RepoDigests // [] | index($d) != null' >/dev/null 2>&1; then
+    log "$_img verified: $_want"
+    return 0
+  fi
+  _got=$(api GET "/images/$_img/json" | jq -r '(.RepoDigests // []) | join(", ")' 2>/dev/null || true)
+  PULL_ERR="the image pulled for $_img ($_got) is not the one the core handed out ($_want); refusing to run it"
+  return 1
+}
+
 # read_kv FILE KEY - one value from a KEY=VALUE file, read as data (the file is never sourced: its
 # values arrive over the network and would otherwise run as shell, here with the Docker socket).
 read_kv() { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | head -n1; }
@@ -155,10 +187,11 @@ build_create_body() {
     + (if $net != null then {NetworkingConfig: $net} else {} end)'
 }
 
-# recreate_container NAME NEW_IMAGE - the full pull -> clone-config recreate -> verify -> rollback
-# dance. Returns 0 on success, or 1 with RECREATE_ERR set (and the previous container restored).
+# recreate_container NAME NEW_IMAGE [DIGEST] - the full pull -> clone-config recreate -> verify ->
+# rollback dance. Returns 0 on success, or 1 with RECREATE_ERR set (and the previous container
+# restored). With a DIGEST, the pull must resolve to it (see pull_verified).
 recreate_container() {
-  NAME="$1"; NEW_IMAGE="$2"
+  NAME="$1"; NEW_IMAGE="$2"; EXPECT_DIGEST="${3:-}"
   if ! valid_tag "$(image_tag "$NEW_IMAGE")"; then
     RECREATE_ERR="refusing image reference '$NEW_IMAGE': not a valid tag"
     return 1
@@ -173,20 +206,15 @@ recreate_container() {
   fi
   log "$NAME  $CUR_IMAGE -> $NEW_IMAGE"
 
-  # Pull with a few retries: a transient registry/network blip must not silently no-op the update
-  # (the pull happens BEFORE we touch the container, so a failure here leaves it running untouched).
+  # Pull with a few retries, then verify the digest when one was handed out: a transient registry
+  # blip must not silently no-op the update, and a swapped image must not run (the pull happens
+  # BEFORE we touch the container, so a failure here leaves it running untouched).
   progress "pulling $NEW_IMAGE"
-  _pn=1
-  until docker pull "$NEW_IMAGE"; do
-    if [ "$_pn" -ge 3 ]; then
-      RECREATE_ERR="pull of $NEW_IMAGE failed after 3 attempts - the $RECREATE_NOUN was left untouched"
-      log "pull failed after 3 attempts - the $RECREATE_NOUN untouched"
-      return 1
-    fi
-    log "pull attempt $_pn failed; retrying in 5s"
-    _pn=$(( _pn + 1 ))
-    sleep 5
-  done
+  if ! pull_verified "$NEW_IMAGE" "$EXPECT_DIGEST"; then
+    RECREATE_ERR="$PULL_ERR - the $RECREATE_NOUN was left untouched"
+    log "$RECREATE_ERR"
+    return 1
+  fi
 
   # Clone the running config, swapping only the image (see build_create_body: preserves the network
   # endpoint's static IP / MAC / aliases and an operator hostname, which a plain HostConfig clone drops).

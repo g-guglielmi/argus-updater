@@ -3,8 +3,9 @@
 # argus-updater
 
 The shared self-update sidecar for [Argus](https://github.com/g-guglielmi/argus-core). One small
-socket-holding container that recreates a target container on a new image - pull → recreate cloning
-the running config → health-verify → roll back on failure - used by **both** the core and the
+socket-holding container that recreates a target container on a new image - pull → verify the
+pulled digest against the one Argus handed out with the tag → recreate cloning the running config →
+health-verify → roll back on failure - used by **both** the core and the
 [argus-probe](https://github.com/g-guglielmi/argus-probe) proxies, so the public-facing core (and the
 outbound-only probes) never need to hold the Docker socket themselves.
 

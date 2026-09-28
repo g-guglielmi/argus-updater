@@ -13,6 +13,20 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-29
+
+### Security
+- **Pulled images are verified against the digest the core handed out.** Tags stay tags (`latest`,
+  `testing`, a version); the core now sends, with each tag, the digest it pointed to at hand-out
+  time (probe check-in: `target_digest`, `update_digest`, `updater_update_digest`; core request:
+  `digests` per tag; updater request: `digest`), and every mode compares the pulled image's
+  repository digest against it before recreating anything. A mismatch is refused and logged, the
+  container left untouched. The self-update helper image is pulled and verified the same way before
+  it is run (it no longer uses `--pull always`). No digest (an older core, the registry unreachable
+  at hand-out) means the tag is applied unverified, with a log line, as before.
+- CI: actions pinned to commits, permissions granted per job, provenance and SBOM attestations on
+  the image.
+
 ## [0.2.6] - 2026-09-28
 
 ### Security

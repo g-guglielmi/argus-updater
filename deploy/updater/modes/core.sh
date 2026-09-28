@@ -89,6 +89,8 @@ check_updater_request() {
   [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
   _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
   if ! valid_tag "$_utag"; then log "updater request $_uid carries an invalid tag - ignoring"; rm -f "$UPDATER_REQUEST"; return 0; fi
+  _udigest=$(jq -r '.digest // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
+  if [ -n "$_udigest" ] && ! valid_digest "$_udigest"; then log "updater request $_uid carries a malformed digest - ignoring it"; _udigest=""; fi
   _self=$(self_container_id)
   # Name the helper (so `docker logs <name>` reaches it while it runs) but --rm it (auto-removed on
   # exit - no lingering container). --pull always so it runs the freshest image, never stale code.
@@ -98,12 +100,18 @@ check_updater_request() {
   log "updater self-update to $_utag requested (id $_uid) - spawning $_helper (target $_self)"
   rm -f "$UPDATER_REQUEST"
   docker rm -f "$_helper" >/dev/null 2>&1 || true
-  docker run -d --rm --name "$_helper" --pull always \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -e ARGUS_UPDATER_MODE=probe-recreate \
-    -e ARGUS_RECREATE_TARGET="$_self" \
-    -e ARGUS_RECREATE_TAG="$_utag" \
-    "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn $_helper (check: docker logs $_helper)"
+  # The helper IS the new updater: pull and verify it here, then run exactly what was pulled.
+  if pull_verified "$UPDATER_REPO:$_utag" "$_udigest"; then
+    docker run -d --rm --name "$_helper" \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -e ARGUS_UPDATER_MODE=probe-recreate \
+      -e ARGUS_RECREATE_TARGET="$_self" \
+      -e ARGUS_RECREATE_TAG="$_utag" \
+      -e ARGUS_RECREATE_DIGEST="$_udigest" \
+      "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn $_helper (check: docker logs $_helper)"
+  else
+    log "updater self-update refused: $PULL_ERR"
+  fi
 }
 
 # do_update - run one update job end to end, writing status as it goes.
@@ -140,9 +148,13 @@ do_update() {
     esac
   fi
   NEW_IMAGE="$REPO:$TARGET_TAG"
+  # The digest the core saw this tag point to when it wrote the request (per tag, since the tag
+  # pulled may be the preserved channel rather than the requested one).
+  EXPECT=$(jq -r --arg t "$TARGET_TAG" '.digests[$t] // empty' "$REQUEST" 2>/dev/null || true)
+  if [ -n "$EXPECT" ] && ! valid_digest "$EXPECT"; then log "request $ID carries a malformed digest for $TARGET_TAG - ignoring it"; EXPECT=""; fi
   log "target version $TAG -> image $NEW_IMAGE"
 
-  if recreate_container "$NAME" "$NEW_IMAGE"; then
+  if recreate_container "$NAME" "$NEW_IMAGE" "$EXPECT"; then
     write_status success "updated to $TAG" "$(now)"
   else
     write_status failed "$RECREATE_ERR" "$(now)"

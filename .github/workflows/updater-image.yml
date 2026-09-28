@@ -15,9 +15,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-permissions:
-  packages: write   # push the image to GHCR
-  contents: write   # publish a Release on tag builds
+# Permissions are granted per job: the tests need nothing, the image build pushes to GHCR and
+# publishes the Release on a tag.
+permissions: {}
 
 concurrency:
   group: updater-image
@@ -28,19 +28,24 @@ jobs:
   # image swap). Pure shell + jq against fixture docker-inspect JSON - no daemon needed. The image
   # build depends on it, so a regression here never reaches :latest.
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - name: recreate config-clone test
         run: bash deploy/updater/test/recreate_test.sh
 
   docker:
+    permissions:
+      contents: write   # publish a Release on tag builds
+      packages: write   # push the image to GHCR
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0   # full history + tags so git describe can stamp the build
 
@@ -72,10 +77,10 @@ jobs:
           } >> RELEASE_NOTES.md
           echo "----- release notes -----"; cat RELEASE_NOTES.md
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -83,7 +88,7 @@ jobs:
 
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/argus-updater
           tags: |
@@ -93,11 +98,13 @@ jobs:
             type=sha,format=short
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./deploy/updater
           file: ./deploy/updater/Dockerfile
           push: true
+          provenance: true
+          sbom: true
           build-args: |
             UPDATER_VERSION=${{ steps.version.outputs.value }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -107,7 +114,7 @@ jobs:
 
       - name: Publish Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: argus-updater ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md

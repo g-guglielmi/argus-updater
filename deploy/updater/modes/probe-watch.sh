@@ -73,6 +73,15 @@ while true; do
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
     UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)
+    # The digest each tag pointed to when the core handed it out; the pull must match (a malformed
+    # one is dropped and the tag applied unverified, with a log line, as with an older core).
+    TARGET_DIGEST=$(echo "$RESP" | jq -r '.target_digest // empty' 2>/dev/null || true)
+    UPDATE_DIGEST=$(echo "$RESP" | jq -r '.update_digest // empty' 2>/dev/null || true)
+    UPDATER_UPDATE_DIGEST=$(echo "$RESP" | jq -r '.updater_update_digest // empty' 2>/dev/null || true)
+    for _v in TARGET_DIGEST UPDATE_DIGEST UPDATER_UPDATE_DIGEST; do
+      eval "_t=\$$_v"
+      if [ -n "$_t" ] && ! valid_digest "$_t"; then log "ignoring a malformed $_v from Argus"; eval "$_v=''"; fi
+    done
     # Every tag the core hands out is checked before it becomes an image reference.
     for _v in TARGET UPDATE UPDATER_UPDATE; do
       eval "_t=\$$_v"
@@ -91,13 +100,19 @@ while true; do
       HELPER="${_sn}-selfupdate"
       log "updater self-update to $UPDATER_UPDATE requested - spawning $HELPER (target $SELF)"
       docker rm -f "$HELPER" >/dev/null 2>&1 || true
-      docker run -d --rm --name "$HELPER" --pull always \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -e ARGUS_UPDATER_MODE=probe-recreate \
-        -e ARGUS_RECREATE_TARGET="$SELF" \
-        -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" \
-        "$UPDATER_REPO:$UPDATER_UPDATE" >/dev/null 2>&1 \
-        || log "could not spawn $HELPER (check: docker logs $HELPER)"
+      # The helper IS the new updater: pull and verify it here, then run exactly what was pulled.
+      if pull_verified "$UPDATER_REPO:$UPDATER_UPDATE" "$UPDATER_UPDATE_DIGEST"; then
+        docker run -d --rm --name "$HELPER" \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -e ARGUS_UPDATER_MODE=probe-recreate \
+          -e ARGUS_RECREATE_TARGET="$SELF" \
+          -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" \
+          -e ARGUS_RECREATE_DIGEST="$UPDATER_UPDATE_DIGEST" \
+          "$UPDATER_REPO:$UPDATER_UPDATE" >/dev/null 2>&1 \
+          || log "could not spawn $HELPER (check: docker logs $HELPER)"
+      else
+        log "updater self-update refused: $PULL_ERR"
+      fi
     fi
 
     NAME=$(resolve_proxy || true)
@@ -110,16 +125,16 @@ while true; do
 
       # A one-shot dashboard update forces a recreate (re-pull the tag, even :latest); otherwise
       # converge on the fleet target only when its tag differs from the running one.
-      DESIRED=""; FORCE=0
+      DESIRED=""; FORCE=0; EXPECT=""
       if [ -n "$UPDATE" ]; then
-        DESIRED="latest"; [ "$UPDATE" != "latest" ] && DESIRED="$UPDATE"; FORCE=1
+        DESIRED="latest"; [ "$UPDATE" != "latest" ] && DESIRED="$UPDATE"; FORCE=1; EXPECT="$UPDATE_DIGEST"
       elif [ -n "$TARGET" ]; then
-        DESIRED="latest"; [ "$TARGET" != "latest" ] && DESIRED="$TARGET"
+        DESIRED="latest"; [ "$TARGET" != "latest" ] && DESIRED="$TARGET"; EXPECT="$TARGET_DIGEST"
       fi
 
       if [ -n "$DESIRED" ] && { [ "$FORCE" = "1" ] || [ "$DESIRED" != "$CUR_TAG" ]; }; then
         log "converging $NAME: $CUR_TAG -> $DESIRED (force=$FORCE)"
-        if recreate_container "$NAME" "$REPO:$DESIRED"; then
+        if recreate_container "$NAME" "$REPO:$DESIRED" "$EXPECT"; then
           log "$NAME updated to $REPO:$DESIRED"
         else
           log "update failed: $RECREATE_ERR" >&2

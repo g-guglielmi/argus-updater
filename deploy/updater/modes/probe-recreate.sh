@@ -17,6 +17,11 @@ set -eu
 
 TARGET="${ARGUS_RECREATE_TARGET:?set ARGUS_RECREATE_TARGET}"
 TAG="${ARGUS_RECREATE_TAG:?set ARGUS_RECREATE_TAG}"
+DIGEST="${ARGUS_RECREATE_DIGEST:-}"   # optional: the pull must resolve to it
+if [ -n "$DIGEST" ] && ! valid_digest "$DIGEST"; then
+  echo "argus-updater[recreate]: ARGUS_RECREATE_DIGEST is malformed - aborting (target untouched)" >&2
+  exit 1
+fi
 if ! valid_tag "$TAG"; then
   echo "argus-updater[recreate]: '$TAG' is not a valid image tag - aborting (target untouched)" >&2
   exit 1
@@ -36,7 +41,7 @@ if [ -z "$NAME" ] || [ -z "$CUR_IMAGE" ]; then
 fi
 NEW_IMAGE="$(image_repo "$CUR_IMAGE"):$TAG"
 
-if recreate_container "$NAME" "$NEW_IMAGE"; then
+if recreate_container "$NAME" "$NEW_IMAGE" "$DIGEST"; then
   log "$NAME updated to $NEW_IMAGE"
   exit 0
 else
