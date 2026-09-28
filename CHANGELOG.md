@@ -13,7 +13,21 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
-## [0.2.5] - 2026-09-26
+## [0.2.6] - 2026-09-28
+
+### Security
+- The probe-watch sidecar reads the proxy's `proxy.env` as data (one key at a time, each checked
+  for shape) instead of sourcing it as shell. The file's values arrive from the network through
+  another container, and this container holds the Docker socket: a crafted value used to run as
+  root here.
+- Every image tag the core hands out (fleet target, one-shot update, updater self-update) and every
+  tag in a core update request is checked before it becomes an image reference; anything that isn't
+  a plain tag is ignored with a log line.
+- A plain-http check-in URL is refused unless `ARGUS_ALLOW_INSECURE_CHECKIN=true` (the sidecar's
+  token would otherwise travel in clear).
+- The shared update directory is handed to the core (uid 65532) and made `0750`, no longer
+  world-writable: a request file there is an instruction to the socket holder, so other accounts on
+  the host must not be able to drop one.
 
 ### Added
 - A changelog (this file) that now feeds the GitHub Release notes.

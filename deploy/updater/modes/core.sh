@@ -88,6 +88,7 @@ check_updater_request() {
   _uid=$(jq -r '.id // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
   [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
   _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
+  if ! valid_tag "$_utag"; then log "updater request $_uid carries an invalid tag - ignoring"; rm -f "$UPDATER_REQUEST"; return 0; fi
   _self=$(self_container_id)
   # Name the helper (so `docker logs <name>` reaches it while it runs) but --rm it (auto-removed on
   # exit - no lingering container). --pull always so it runs the freshest image, never stale code.
@@ -148,11 +149,14 @@ do_update() {
   fi
 }
 
-# The non-root, distroless core creates request.json in this shared dir, but a fresh Docker named
-# volume mounts root-owned 0755 - which the core cannot write. We hold the socket and run as root, so
-# make the channel writable by the core here. Self-heals existing volumes on restart.
+# The non-root, distroless core (uid 65532) creates request.json in this shared dir, but a fresh
+# Docker named volume mounts root-owned 0755 - which the core cannot write. We hold the socket and
+# run as root, so hand the directory to the core here: owned by it, writable by it and by us, and
+# by nobody else on the host (a request file here is an instruction to the socket holder).
+# Self-heals existing volumes on restart.
 mkdir -p "$UPDATE_DIR"
-chmod 0777 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DIR (core may be unable to queue updates)"
+chown 65532:65532 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chown $UPDATE_DIR (core may be unable to queue updates)"
+chmod 0750 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DIR"
 
 log "watching $REQUEST (core=$CORE_CONTAINER, poll ${INTERVAL}s)"
 report_core_image   # tell the core its running tag/channel right away, before the first poll
@@ -182,8 +186,8 @@ while true; do
         STARTED_AT=$(now)
         write_status failed "the updater restarted during an update; please verify the core version and retry" "$(now)"
         LAST_ID="$ID"
-      elif [ -z "$TAG" ]; then
-        log "request $ID has no tag - ignoring"
+      elif [ -z "$TAG" ] || ! valid_tag "$TAG"; then
+        log "request $ID has no usable tag - ignoring"
         LAST_ID="$ID"
       else
         log "update requested: $FROM -> $TAG (id $ID)"

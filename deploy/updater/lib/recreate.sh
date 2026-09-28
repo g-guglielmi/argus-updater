@@ -56,6 +56,17 @@ image_repo() { printf '%s' "$1" | sed 's/:[^:/]*$//'; }
 # image_tag IMAGE - the tag (ghcr.io/x/y:tag -> tag; empty if none).
 image_tag()  { printf '%s' "$1" | sed -n 's#.*:\([^:/]*\)$#\1#p'; }
 
+# valid_tag TAG - an image tag we would pull: what the core hands out is checked before it becomes
+# an image reference (letters, digits, dot, underscore, hyphen; no leading punctuation; <= 64).
+valid_tag() {
+  case "$1" in ''|*[!A-Za-z0-9._-]*|[._-]*) return 1;; esac
+  [ "${#1}" -le 64 ]
+}
+
+# read_kv FILE KEY - one value from a KEY=VALUE file, read as data (the file is never sourced: its
+# values arrive over the network and would otherwise run as shell, here with the Docker socket).
+read_kv() { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | head -n1; }
+
 # verify NAME - return 0 once the container looks healthy: it stays Running and not Restarting for
 # HEALTH_STABLE seconds (a crash-loop guard - a bad image that starts then exits never reaches a
 # stable window). When ARGUS_VERIFY_HEALTHZ=1 and the container has an IP on a shared network, a
@@ -148,6 +159,10 @@ build_create_body() {
 # dance. Returns 0 on success, or 1 with RECREATE_ERR set (and the previous container restored).
 recreate_container() {
   NAME="$1"; NEW_IMAGE="$2"
+  if ! valid_tag "$(image_tag "$NEW_IMAGE")"; then
+    RECREATE_ERR="refusing image reference '$NEW_IMAGE': not a valid tag"
+    return 1
+  fi
   RECREATE_ERR=""
 
   INSPECT=$(api GET "/containers/$NAME/json")

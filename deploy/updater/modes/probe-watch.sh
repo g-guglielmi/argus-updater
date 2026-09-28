@@ -52,8 +52,17 @@ resolve_proxy() {
 
 log "starting (poll ${INTERVAL}s, proxy=${PROXY_CONTAINER:-<by image $PROBE_IMAGE>})"
 while true; do
-  PROBE_TOKEN=""; CHECKIN_URL=""
-  [ -f "$META" ] && { . "$META" 2>/dev/null || true; }
+  # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
+  # mounted read-only here, but its contents came from the network and from another container.
+  PROBE_TOKEN=$(read_kv "$META" PROBE_TOKEN)
+  CHECKIN_URL=$(read_kv "$META" CHECKIN_URL)
+  case "$PROBE_TOKEN" in ''|*[!A-Za-z0-9._-]*) PROBE_TOKEN="";; esac
+  if printf '%s' "$CHECKIN_URL" | grep -q '[^A-Za-z0-9.:/_%?=&-]'; then CHECKIN_URL=""; fi
+  case "$CHECKIN_URL" in
+    https://*|'') ;;
+    http://*) [ "${ARGUS_ALLOW_INSECURE_CHECKIN:-}" = "true" ] || { log "refusing the plain-http check-in URL in $META (set ARGUS_ALLOW_INSECURE_CHECKIN=true to allow it)"; CHECKIN_URL=""; };;
+    *) CHECKIN_URL="";;
+  esac
 
   if [ -n "$PROBE_TOKEN" ] && [ -n "$CHECKIN_URL" ]; then
     # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
@@ -64,6 +73,11 @@ while true; do
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
     UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)
+    # Every tag the core hands out is checked before it becomes an image reference.
+    for _v in TARGET UPDATE UPDATER_UPDATE; do
+      eval "_t=\$$_v"
+      if [ -n "$_t" ] && ! valid_tag "$_t"; then log "ignoring an invalid $_v tag from Argus"; eval "$_v=''"; fi
+    done
 
     # Self-update: recreate OURSELVES via an ephemeral --rm copy running probe-recreate against our
     # own container (we can't rm -f ourselves). The ephemeral helper uses the NEW updater image so it

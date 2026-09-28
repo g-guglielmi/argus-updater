@@ -17,6 +17,10 @@ set -eu
 
 TARGET="${ARGUS_RECREATE_TARGET:?set ARGUS_RECREATE_TARGET}"
 TAG="${ARGUS_RECREATE_TAG:?set ARGUS_RECREATE_TAG}"
+if ! valid_tag "$TAG"; then
+  echo "argus-updater[recreate]: '$TAG' is not a valid image tag - aborting (target untouched)" >&2
+  exit 1
+fi
 RECREATE_NOUN="container"
 
 log()      { echo "argus-updater[recreate]: $*"; }
