@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-29
+
 ### Added
 - `probe-watch` restarts the proxy (Engine API restart, no recreate) when Argus answers a check-in
   with `restart_proxy`: the proxy reads its Zabbix process counts only at start, and Argus now sizes
