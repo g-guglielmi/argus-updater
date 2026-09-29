@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-09-29
+
 ### Added
 - A Docker `HEALTHCHECK` (`/app/healthcheck.sh`): healthy while the Docker Engine answers `/_ping` on
   the socket and, in the `core` and `probe-watch` modes, while the watch loop keeps going round. Each
