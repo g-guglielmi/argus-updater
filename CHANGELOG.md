@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-09-29
+
+### Fixed
+- The digest the core hands out was rejected as malformed by the shape check (a shell pattern that
+  misbehaved), so every update in 0.2.7 fell back to "no digest handed out; applying unverified".
+  The check is now a length + prefix + hex test; verified pulls log `verified: sha256:...`.
+
 ## [0.2.7] - 2026-09-29
 
 ### Security

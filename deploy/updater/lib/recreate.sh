@@ -64,7 +64,12 @@ valid_tag() {
 }
 
 # valid_digest DIGEST - the shape of a content digest the core hands out with a tag.
-valid_digest() { case "$1" in sha256:????????????????????????????????????????????????????????????????) case "$1" in *[!a-f0-9:]*) return 1;; esac; return 0;; *) return 1;; esac; }
+valid_digest() {
+  [ "${#1}" -eq 71 ] || return 1
+  case "$1" in sha256:*) ;; *) return 1;; esac
+  case "${1#sha256:}" in *[!a-f0-9]*) return 1;; esac
+  return 0
+}
 
 # pull_verified IMAGE [DIGEST] - docker pull with retries, then, when a digest was handed out with
 # the tag, check the pulled image's repository digest against it. Tags stay tags (latest, testing,
