@@ -35,4 +35,10 @@ COPY lib/   /usr/local/lib/argus-updater/lib/
 COPY modes/ /usr/local/lib/argus-updater/modes/
 RUN chmod +x /usr/local/bin/argus-updater
 
+# Container health for Docker, the Unraid GUI or Dockhand: the Engine answers on the socket and the
+# watch loop keeps going round (healthcheck.sh).
+COPY healthcheck.sh /app/healthcheck.sh
+RUN chmod 0755 /app/healthcheck.sh
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD ["/app/healthcheck.sh"]
+
 ENTRYPOINT ["/usr/local/bin/argus-updater"]

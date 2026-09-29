@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- A Docker `HEALTHCHECK` (`/app/healthcheck.sh`): healthy while the Docker Engine answers `/_ping` on
+  the socket and, in the `core` and `probe-watch` modes, while the watch loop keeps going round. Each
+  round writes a heartbeat with how long the next one may take (an update or a proxy recreate
+  included, about half an hour of margin); a loop stuck past it is unhealthy. The one-shot
+  `probe-recreate` mode checks the socket only. Every 30 s, unhealthy after 3 failures.
+
 ## [0.2.9] - 2026-09-29
 
 ### Added

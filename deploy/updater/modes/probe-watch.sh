@@ -54,6 +54,7 @@ resolve_proxy() {
 
 log "starting (poll ${INTERVAL}s, proxy=${PROXY_CONTAINER:-<by image $PROBE_IMAGE>})"
 while true; do
+  heartbeat $((INTERVAL * 2 + 1800))   # a round may include a proxy recreate
   # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
   # mounted read-only here, but its contents came from the network and from another container.
   PROBE_TOKEN=$(read_kv "$META" PROBE_TOKEN)

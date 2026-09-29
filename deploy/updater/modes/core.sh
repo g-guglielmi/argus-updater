@@ -175,6 +175,7 @@ report_core_image   # tell the core its running tag/channel right away, before t
 report_updater      # ...and our own sidecar version
 LAST_ID=""
 while true; do
+  heartbeat $((INTERVAL * 3 + 1800))   # a round may include a whole update
   report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
   report_updater      # keep our reported sidecar version current
   check_updater_request   # act on a "update the sidecar" request from the core

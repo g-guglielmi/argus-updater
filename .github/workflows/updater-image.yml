@@ -37,6 +37,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
       - name: recreate config-clone test
         run: bash deploy/updater/test/recreate_test.sh
+      - name: container healthcheck test
+        run: bash deploy/updater/test/healthcheck_test.sh
 
   docker:
     permissions:

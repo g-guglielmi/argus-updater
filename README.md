@@ -51,6 +51,11 @@ Every mode recreates via the **Docker Engine API** (no `docker compose` dependen
 is triggered from the core's **Settings → update** flow; `probe-watch` is driven by Argus fleet
 updates (see the argus-probe / argus-core repos).
 
+**Container health.** The image declares a Docker `HEALTHCHECK` (`/app/healthcheck.sh`): the
+Engine must answer on the socket, and in the long-running modes the watch loop must keep going round
+(each round writes `/tmp/argus-updater.heartbeat` with how long the next may take, an update
+included). `docker ps`, the Unraid GUI and Dockhand show the result.
+
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash

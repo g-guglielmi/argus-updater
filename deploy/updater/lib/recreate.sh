@@ -27,6 +27,15 @@
 # reason (already rolled back to the previous container).
 
 SOCK=/var/run/docker.sock
+
+# heartbeat MAX_AGE - tell the container healthcheck (/app/healthcheck.sh) that the watch loop is
+# still going round: now, and how long the next round may take before it counts as stuck.
+heartbeat() {
+  _hb="${ARGUS_HEARTBEAT_FILE:-/tmp/argus-updater.heartbeat}"
+  # Written aside and renamed, so the healthcheck never reads a half-written file.
+  printf '%s %s\n' "$(date +%s)" "$1" > "$_hb.new" 2>/dev/null && mv -f "$_hb.new" "$_hb" 2>/dev/null || true
+}
+
 RECREATE_NOUN="${RECREATE_NOUN:-container}"
 HEALTH_STABLE="${ARGUS_HEALTH_STABLE:-20}"
 VERIFY_TIMEOUT="${ARGUS_VERIFY_TIMEOUT:-90}"
