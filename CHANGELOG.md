@@ -13,6 +13,12 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- `probe-watch` restarts the proxy (Engine API restart, no recreate) when Argus answers a check-in
+  with `restart_proxy`: the proxy reads its Zabbix process counts only at start, and Argus now sizes
+  them from the probe's load. The sidecar advertises the ability (`restarts`); a proxy recreated in
+  the same round already runs the new counts and is not restarted again.
+
 ## [0.2.8] - 2026-09-29
 
 ### Fixed

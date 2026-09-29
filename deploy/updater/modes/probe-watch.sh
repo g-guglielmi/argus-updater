@@ -16,6 +16,8 @@
 #   - a dashboard "Update now" (the one-shot {"update":"<tag>"}) - always recreates (re-pulls the tag,
 #     so a rolling :latest picks up a newer digest); or
 #   - a fleet-target change - recreates only when the target tag differs from what the proxy runs.
+# It also restarts the proxy (no recreate) when Argus asks for it with {"restart_proxy":true}: the
+# proxy reads its Zabbix process counts only at start, and Argus sizes them from the probe's load.
 #
 # Deploy alongside a proxy (the proxy stays socket-free):
 #   docker run -d --name <proxy>-updater --restart unless-stopped \
@@ -68,11 +70,13 @@ while true; do
     # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
     # proxy version (the proxy reports its own); updater_version is our sidecar's own version.
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg uv "$UPDATER_VERSION" '{selfupdate:true, updater_version:$uv}')" \
+      -d "$(jq -nc --arg uv "$UPDATER_VERSION" '{selfupdate:true, updater_version:$uv, restarts:true}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
     UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)
+    # A one-shot restart of the proxy, so it starts with the process counts Argus now wants.
+    RESTART_PROXY=$(echo "$RESP" | jq -r 'if .restart_proxy == true then "yes" else "" end' 2>/dev/null || true)
     # The digest each tag pointed to when the core handed it out; the pull must match (a malformed
     # one is dropped and the tag applied unverified, with a log line, as with an older core).
     TARGET_DIGEST=$(echo "$RESP" | jq -r '.target_digest // empty' 2>/dev/null || true)
@@ -132,12 +136,25 @@ while true; do
         DESIRED="latest"; [ "$TARGET" != "latest" ] && DESIRED="$TARGET"; EXPECT="$TARGET_DIGEST"
       fi
 
+      RECREATED=0
       if [ -n "$DESIRED" ] && { [ "$FORCE" = "1" ] || [ "$DESIRED" != "$CUR_TAG" ]; }; then
         log "converging $NAME: $CUR_TAG -> $DESIRED (force=$FORCE)"
         if recreate_container "$NAME" "$REPO:$DESIRED" "$EXPECT"; then
           log "$NAME updated to $REPO:$DESIRED"
+          RECREATED=1
         else
           log "update failed: $RECREATE_ERR" >&2
+        fi
+      fi
+      # A recreated proxy has just started, and so already runs the counts Argus wants.
+      if [ -n "$RESTART_PROXY" ] && [ "$RECREATED" = "0" ]; then
+        log "restarting $NAME: Argus changed its Zabbix process counts"
+        # The Engine API answers 204 with no body on success, a JSON message otherwise.
+        _out=$(api POST "/containers/$NAME/restart?t=30" 2>&1 || true)
+        if [ -z "$_out" ]; then
+          log "$NAME restarted"
+        else
+          log "restart of $NAME failed: $(printf '%s' "$_out" | jq -r '.message // .' 2>/dev/null || printf '%s' "$_out")" >&2
         fi
       fi
     fi

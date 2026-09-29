@@ -44,7 +44,7 @@ mode keeps working unchanged). The recreate engine is shared, so the paths can n
 | Mode | Lifetime | What it does |
 |------|----------|--------------|
 | `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks **Settings → Update now**. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). |
-| `probe-watch` | long-running | **The probe updater** (run / compose / VM). A socket-holding sidecar that recreates the proxy via the Engine API on a dashboard "Update now" or a target change - so the **proxy stays socket-free**, same as the core. Also updates **itself** on request via the primitive below. |
+| `probe-watch` | long-running | **The probe updater** (run / compose / VM). A socket-holding sidecar that recreates the proxy via the Engine API on a dashboard "Update now" or a target change - so the **proxy stays socket-free**, same as the core. Restarts the proxy when Argus changes its Zabbix process counts (read only at start). Also updates **itself** on request via the primitive below. |
 | `probe-recreate` | one-shot | Recreate a target container on a new image, then exit. The self-update **primitive**: a long-running updater spawns an ephemeral `--rm` copy of itself in this mode to recreate itself. |
 
 Every mode recreates via the **Docker Engine API** (no `docker compose` dependency). The `core` mode
