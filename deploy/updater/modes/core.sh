@@ -11,6 +11,7 @@
 #   request.json    (core writes) -> {id, tag, from, requested_by, requested_at, exact}
 #   status.json     (we write)    -> {id, state:"running|success|failed", from, to, message, ...}
 #   core-image.json (we write)    -> {image, tag}  the tag the core runs under, so it knows its channel
+#   updater-status.json (we + our swap helper write) -> a sidecar self-update, step by step
 #   collectors.json (we write)    -> {state, message, version, installed, at}  the core host's
 #                                    collectors, installed from the running core image (lib/collectors.sh)
 #
@@ -24,6 +25,7 @@ STATUS="$UPDATE_DIR/status.json"
 CORE_IMAGE_FILE="$UPDATE_DIR/core-image.json"
 UPDATER_FILE="$UPDATE_DIR/updater.json"            # we report OUR (sidecar) version here
 UPDATER_REQUEST="$UPDATE_DIR/updater-request.json"  # the core drops this to update US
+SELF_STATUS="$UPDATE_DIR/updater-status.json"       # ...and reads that update's steps here
 CORE_CONTAINER="${ARGUS_CORE_CONTAINER:-argus}"
 CORE_IMAGE="${ARGUS_CORE_IMAGE:-ghcr.io/g-guglielmi/argus}"
 UPDATER_REPO="${ARGUS_UPDATER_REPO:-ghcr.io/g-guglielmi/argus-updater}"
@@ -42,11 +44,17 @@ now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "argus-updater[core]: $*"; }
 
 # write_status STATE MESSAGE [FINISHED_AT] - atomic (tmp + mv) so the core never reads a partial file.
+# Each new message is also kept as a step, so Settings shows the whole update, not just its last line.
+STEPS='[]'; LAST_MSG=''
 write_status() {
   _state="$1"; _msg="$2"; _fin="${3:-}"
+  if [ -n "$_msg" ] && [ "$_msg" != "$LAST_MSG" ]; then
+    STEPS=$(printf '%s' "$STEPS" | jq -c --arg at "$(now)" --arg m "$_msg" '. + [{at:$at, msg:$m}]' 2>/dev/null || printf '%s' "$STEPS")
+    LAST_MSG="$_msg"
+  fi
   jq -nc --arg id "$ID" --arg s "$_state" --arg from "$FROM" --arg to "$TAG" \
-     --arg msg "$_msg" --arg started "$STARTED_AT" --arg fin "$_fin" \
-     '{id:$id, state:$s, from:$from, to:$to, message:$msg, started_at:$started}
+     --arg msg "$_msg" --arg started "$STARTED_AT" --arg fin "$_fin" --argjson steps "$STEPS" \
+     '{id:$id, state:$s, from:$from, to:$to, message:$msg, started_at:$started, steps:$steps}
       + (if $fin == "" then {} else {finished_at:$fin} end)' \
      > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
 }
@@ -88,41 +96,96 @@ report_updater() {
 
 # check_updater_request - the core drops updater-request.json to update the sidecar itself. We can't
 # rm -f ourselves, so spawn an ephemeral --rm copy in probe-recreate mode targeting our own container.
-# Consume the request BEFORE spawning so the recreated (new) sidecar never re-runs it.
+# Consume the request BEFORE spawning so the recreated (new) sidecar never re-runs it. Every step goes
+# to updater-status.json (the helper adds its own), so Settings follows the update to its end.
 check_updater_request() {
   [ -f "$UPDATER_REQUEST" ] || return 0
   _uid=$(jq -r '.id // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
   [ -z "$_uid" ] && { rm -f "$UPDATER_REQUEST"; return 0; }
   _utag=$(jq -r '.tag // "latest"' "$UPDATER_REQUEST" 2>/dev/null || echo latest)
-  if ! valid_tag "$_utag"; then log "updater request $_uid carries an invalid tag - ignoring"; rm -f "$UPDATER_REQUEST"; return 0; fi
+  if ! valid_tag "$_utag"; then
+    log "updater request $_uid carries an invalid tag - ignoring"; rm -f "$UPDATER_REQUEST"
+    job_write "$SELF_STATUS" "$_uid" failed "the request names no valid version; the sidecar stays on $UPDATER_VERSION"
+    return 0
+  fi
   _udigest=$(jq -r '.digest // empty' "$UPDATER_REQUEST" 2>/dev/null || true)
   if [ -n "$_udigest" ] && ! valid_digest "$_udigest"; then log "updater request $_uid carries a malformed digest - ignoring it"; _udigest=""; fi
   _self=$(self_container_id)
+  _selfjson=$(api GET "/containers/$_self/json" 2>/dev/null || true)
   # Name the helper (so `docker logs <name>` reaches it while it runs) but --rm it (auto-removed on
   # exit - no lingering container). --pull always so it runs the freshest image, never stale code.
-  _sn=$(api GET "/containers/$_self/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
+  _sn=$(printf '%s' "$_selfjson" | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
   [ -z "$_sn" ] && _sn="argus-updater"
   _helper="${_sn}-selfupdate"
   log "updater self-update to $_utag requested (id $_uid) - spawning $_helper (target $_self)"
   rm -f "$UPDATER_REQUEST"
+  job_write "$SELF_STATUS" "$_uid" running "the sidecar ($UPDATER_VERSION) picked up the update to $_utag" \
+    "$(jq -nc --arg f "$UPDATER_VERSION" --arg t "$_utag" '{from:$f, tag:$t}')"
   docker rm -f "$_helper" >/dev/null 2>&1 || true
   # The helper IS the new updater: pull and verify it here, then run exactly what was pulled.
-  if pull_verified "$UPDATER_REPO:$_utag" "$_udigest"; then
-    docker run -d --rm --name "$_helper" \
-      -v /var/run/docker.sock:/var/run/docker.sock \
+  job_write "$SELF_STATUS" "$_uid" running "pulling $UPDATER_REPO:$_utag"
+  if ! pull_verified "$UPDATER_REPO:$_utag" "$_udigest"; then
+    log "updater self-update refused: $PULL_ERR"
+    job_write "$SELF_STATUS" "$_uid" failed "$PULL_ERR; the sidecar stays on $UPDATER_VERSION"
+    return 0
+  fi
+  _newid=$(docker image inspect --format '{{.Id}}' "$UPDATER_REPO:$_utag" 2>/dev/null || true)
+  _newver=$(docker image inspect --format '{{index .Config.Labels "io.argus.updater.version"}}' "$UPDATER_REPO:$_utag" 2>/dev/null || true)
+  case "$_newver" in ""|"<no value>") _newver="the new version" ;; esac
+  _ownid=$(printf '%s' "$_selfjson" | jq -r '.Image // empty' 2>/dev/null || true)
+  if [ -n "$_newid" ] && [ "$_newid" = "$_ownid" ]; then
+    job_write "$SELF_STATUS" "$_uid" success "already on the newest sidecar ($UPDATER_VERSION): nothing to swap"
+    return 0
+  fi
+  job_write "$SELF_STATUS" "$_uid" running "pulled $_newver; a helper swaps it in now (the sidecar restarts, the core keeps running)" \
+    "$(jq -nc --arg to "$_newver" --arg img "$_newid" --arg h "$_helper" '{to:$to, to_image:$img, helper:$h}')"
+  # The helper reports its steps into the same file: hand it the shared dir, where we have it mounted.
+  _umount=$(printf '%s' "$_selfjson" | jq -r --arg d "$UPDATE_DIR" \
+    'first(.Mounts[]? | select(.Destination == $d) | if .Type == "volume" then .Name else .Source end) // empty' 2>/dev/null || true)
+  if [ -n "$_umount" ]; then
+    _jobargs="-v $_umount:$UPDATE_DIR -e ARGUS_JOB_FILE=$SELF_STATUS -e ARGUS_JOB_ID=$_uid"
+  else
+    _jobargs=""
+  fi
+  # shellcheck disable=SC2086 # _jobargs is a list of options
+  if ! docker run -d --rm --name "$_helper" \
+      -v /var/run/docker.sock:/var/run/docker.sock $_jobargs \
       -e ARGUS_UPDATER_MODE=probe-recreate \
       -e ARGUS_RECREATE_TARGET="$_self" \
       -e ARGUS_RECREATE_TAG="$_utag" \
       -e ARGUS_RECREATE_DIGEST="$_udigest" \
-      "$UPDATER_REPO:$_utag" >/dev/null 2>&1 || log "could not spawn $_helper (check: docker logs $_helper)"
-  else
-    log "updater self-update refused: $PULL_ERR"
+      -e ARGUS_RECREATE_NOUN=sidecar \
+      "$UPDATER_REPO:$_utag" >/dev/null 2>&1; then
+    log "could not spawn $_helper (check: docker logs $_helper)"
+    job_write "$SELF_STATUS" "$_uid" failed "could not start the helper that swaps the sidecar; it stays on $UPDATER_VERSION"
   fi
+}
+
+# check_self_update - settle a sidecar self-update its helper left open: while the helper runs it
+# reports the outcome itself; once it is gone without a word, we either run the image it pulled (it
+# died after the swap) or still the old one (the swap never happened, or rolled back silently).
+check_self_update() {
+  [ "$(job_get "$SELF_STATUS" state)" = running ] || return 0
+  _to=$(job_get "$SELF_STATUS" to_image)
+  [ -z "$_to" ] && return 0   # still pulling: the round that runs it judges it
+  _h=$(job_get "$SELF_STATUS" helper)
+  if [ -n "$_h" ] && api GET "/containers/$_h/json" 2>/dev/null | jq -e '.Id' >/dev/null 2>&1; then
+    return 0
+  fi
+  _jid=$(job_get "$SELF_STATUS" id)
+  _own=$(api GET "/containers/$(self_container_id)/json" 2>/dev/null | jq -r '.Image // empty' 2>/dev/null || true)
+  [ -z "$_own" ] && return 0   # can't see ourselves: no verdict
+  if [ "$_own" = "$_to" ]; then
+    job_write "$SELF_STATUS" "$_jid" success "the new sidecar ($UPDATER_VERSION) is running"
+  else
+    job_write "$SELF_STATUS" "$_jid" failed "the swap didn't happen; the sidecar is still on $UPDATER_VERSION"
+  fi
+  return 0
 }
 
 # do_update - run one update job end to end, writing status as it goes.
 do_update() {
-  STARTED_AT=$(now)
+  STARTED_AT=$(now); STEPS='[]'; LAST_MSG=''
   write_status running "starting update to $TAG"
 
   NAME=$(resolve_core || true)
@@ -179,6 +242,7 @@ chmod 0750 "$UPDATE_DIR" 2>/dev/null || log "warning: could not chmod $UPDATE_DI
 log "watching $REQUEST (core=$CORE_CONTAINER, poll ${INTERVAL}s)"
 report_core_image   # tell the core its running tag/channel right away, before the first poll
 report_updater      # ...and our own sidecar version
+check_self_update   # ...and how a self-update of ours ended, when we are its result
 LAST_ID=""
 while true; do
   heartbeat $((INTERVAL * 3 + 1800))   # a round may include a whole update
@@ -186,6 +250,7 @@ while true; do
   sync_collectors     # the core host's Zabbix runs the running image's collectors
   report_updater      # keep our reported sidecar version current
   check_updater_request   # act on a "update the sidecar" request from the core
+  check_self_update       # settle one whose helper is gone
   if [ -f "$REQUEST" ]; then
     ID=$(jq -r '.id // empty' "$REQUEST" 2>/dev/null || true)
     if [ -n "$ID" ] && [ "$ID" != "$LAST_ID" ]; then

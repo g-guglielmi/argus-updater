@@ -34,7 +34,9 @@ flowchart TB
 ```
 
 The sidecar updates **itself** the same way - it spawns a throwaway `probe-recreate` copy (see the
-mode below) that recreates it and exits.
+mode below) that recreates it and exits. In the `core` mode both write each step of that self-update
+to `updater-status.json` in the shared dir, and every core update keeps its steps in `status.json`,
+so the core's Settings page shows what an update is doing until it ends.
 
 ## Modes
 

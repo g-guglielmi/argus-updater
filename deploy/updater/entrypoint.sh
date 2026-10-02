@@ -19,8 +19,10 @@ set -eu
 MODE="${ARGUS_UPDATER_MODE:-core}"
 LIBDIR=/usr/local/lib/argus-updater
 
-# Shared engine (functions: api, verify, recreate_container, image_repo/tag).
+# Shared engine (functions: api, verify, recreate_container, image_repo/tag) and the job status files
+# the core shows an update's steps from (job_write, job_get).
 . "$LIBDIR/lib/recreate.sh"
+. "$LIBDIR/lib/job.sh"
 
 case "$MODE" in
   core)           . "$LIBDIR/modes/core.sh" ;;

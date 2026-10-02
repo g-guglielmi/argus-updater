@@ -13,6 +13,16 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- An update of the sidecar itself reports every step to `updater-status.json` in the shared dir:
+  picked up, pulling, the swap (the helper that recreates the sidecar now gets the shared dir and
+  writes its own steps: recreating, verifying), and how it ended - done with the new version, or why
+  it failed or rolled back. The core shows them while it runs and after, so a page reload no longer
+  hides an update that is still going. A sidecar that is already on the newest image says so instead
+  of swapping itself for nothing; one whose helper vanished without a word is settled on its next
+  round (it runs the new image, or the swap didn't happen).
+- A core update keeps all its steps in `status.json` (`steps`), not just the last message.
+
 ## [0.2.11] - 2026-10-02
 
 ### Added
