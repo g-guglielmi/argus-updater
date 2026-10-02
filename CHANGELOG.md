@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-10-02
+
 ### Added
 - An update of the sidecar itself reports every step to `updater-status.json` in the shared dir:
   picked up, pulling, the swap (the helper that recreates the sidecar now gets the shared dir and
