@@ -39,6 +39,8 @@ jobs:
         run: bash deploy/updater/test/recreate_test.sh
       - name: container healthcheck test
         run: bash deploy/updater/test/healthcheck_test.sh
+      - name: core collectors install test
+        run: bash deploy/updater/test/collectors_test.sh
 
   docker:
     permissions:

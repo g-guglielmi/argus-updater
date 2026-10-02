@@ -13,6 +13,16 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- The `core` mode keeps the core host's collectors current. The core's Zabbix server is a host
+  package, so the external checks it runs for the hosts it monitors (HTTP, TCP, SSH, UPS and the
+  rest) never came with an Argus update: they stayed as setup installed them. Now, whenever the core's
+  image changes, the sidecar runs that image once (as root, no network, only the host's
+  `/usr/lib/zabbix/externalscripts` bound in) and it copies in the collectors that changed; again a
+  day later, to put back a deleted or edited one, and ten minutes after a failure. The outcome goes to
+  `collectors.json` in the shared dir and shows in the core's Settings. An Argus image from before
+  this, or a host with no such folder, is skipped. `ARGUS_COLLECTORS_DIR` sets another folder.
+
 ## [0.2.10] - 2026-09-29
 
 ### Added

@@ -11,6 +11,8 @@
 #   request.json    (core writes) -> {id, tag, from, requested_by, requested_at, exact}
 #   status.json     (we write)    -> {id, state:"running|success|failed", from, to, message, ...}
 #   core-image.json (we write)    -> {image, tag}  the tag the core runs under, so it knows its channel
+#   collectors.json (we write)    -> {state, message, version, installed, at}  the core host's
+#                                    collectors, installed from the running core image (lib/collectors.sh)
 #
 # For each new request it pulls the target image and recreates the core via the shared engine
 # (config-clone + verify + rollback), then writes the outcome back to status.json for the core banner.
@@ -27,6 +29,10 @@ CORE_IMAGE="${ARGUS_CORE_IMAGE:-ghcr.io/g-guglielmi/argus}"
 UPDATER_REPO="${ARGUS_UPDATER_REPO:-ghcr.io/g-guglielmi/argus-updater}"
 UPDATER_VERSION="$(cat /etc/argus-updater.version 2>/dev/null || echo dev)"
 INTERVAL="${ARGUS_UPDATE_INTERVAL:-10}"
+
+# The core host's collectors (its Zabbix server's external checks): sync_collectors.
+# shellcheck source=/dev/null
+. "$LIBDIR/lib/collectors.sh"
 
 # The core is web-facing: accept a passing /healthz as proof of health, on top of stability.
 export ARGUS_VERIFY_HEALTHZ=1
@@ -177,6 +183,7 @@ LAST_ID=""
 while true; do
   heartbeat $((INTERVAL * 3 + 1800))   # a round may include a whole update
   report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
+  sync_collectors     # the core host's Zabbix runs the running image's collectors
   report_updater      # keep our reported sidecar version current
   check_updater_request   # act on a "update the sidecar" request from the core
   if [ -f "$REQUEST" ]; then

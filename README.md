@@ -43,7 +43,7 @@ mode keeps working unchanged). The recreate engine is shared, so the paths can n
 
 | Mode | Lifetime | What it does |
 |------|----------|--------------|
-| `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks **Settings → Update now**. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). |
+| `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks **Settings → Update now**. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). Also keeps the core host's **collectors** current (below). |
 | `probe-watch` | long-running | **The probe updater** (run / compose / VM). A socket-holding sidecar that recreates the proxy via the Engine API on a dashboard "Update now" or a target change - so the **proxy stays socket-free**, same as the core. Restarts the proxy when Argus changes its Zabbix process counts (read only at start). Also updates **itself** on request via the primitive below. |
 | `probe-recreate` | one-shot | Recreate a target container on a new image, then exit. The self-update **primitive**: a long-running updater spawns an ephemeral `--rm` copy of itself in this mode to recreate itself. |
 
@@ -55,6 +55,16 @@ updates (see the argus-probe / argus-core repos).
 Engine must answer on the socket, and in the long-running modes the watch loop must keep going round
 (each round writes `/tmp/argus-updater.heartbeat` with how long the next may take, an update
 included). `docker ps`, the Unraid GUI and Dockhand show the result.
+
+**The core host's collectors.** The core's Zabbix server is a host package, not a container, so the
+collectors (external checks) it runs for the hosts it monitors live in the host's
+`/usr/lib/zabbix/externalscripts` and no image update reaches them. The Argus image carries them, so
+the `core` mode installs them: whenever the core's image changes (an update, a redeploy), and again a
+day later to put back a deleted or edited one, it runs that same image once - as root, with no network
+and only that folder bound in - and `/argus install-collectors` writes the collectors that changed.
+The outcome shows in the core under **Settings → Updates → Collectors**. Nothing to run by hand; a
+host whose Zabbix server runs elsewhere has no such folder and is skipped. `ARGUS_COLLECTORS_DIR`
+points it at another folder.
 
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
