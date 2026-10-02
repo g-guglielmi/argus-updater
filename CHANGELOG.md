@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-10-02
+
 ### Added
 - The `core` mode keeps the core host's collectors current. The core's Zabbix server is a host
   package, so the external checks it runs for the hosts it monitors (HTTP, TCP, SSH, UPS and the
