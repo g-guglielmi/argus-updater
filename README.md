@@ -64,7 +64,7 @@ collectors (external checks) it runs for the hosts it monitors live in the host'
 the `core` mode installs them: whenever the core's image changes (an update, a redeploy), and again a
 day later to put back a deleted or edited one, it runs that same image once - as root, with no network
 and only that folder bound in - and `/argus install-collectors` writes the collectors that changed.
-The outcome shows in the core under **Settings → Updates → Collectors**. Nothing to run by hand; a
+The outcome shows in the core under **Settings → About → Collectors**. Nothing to run by hand; a
 host whose Zabbix server runs elsewhere has no such folder and is skipped. `ARGUS_COLLECTORS_DIR`
 points it at another folder.
 
