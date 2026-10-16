@@ -80,10 +80,63 @@ valid_digest() {
   return 0
 }
 
-# pull_verified IMAGE [DIGEST] - docker pull with retries, then, when a digest was handed out with
-# the tag, check the pulled image's repository digest against it. Tags stay tags (latest, testing,
-# a version); the digest is what the core saw the tag point to when it handed it out, so an image
-# swapped under the tag in between is refused, not run. Returns 1 with PULL_ERR set on failure.
+# --- image signatures ---------------------------------------------------------------------------
+# Every Argus image is signed keyless (Sigstore) by the workflow that built it: the signature names
+# that workflow and sits in the public transparency log, so a pull can prove the image came from
+# the build and not from someone holding a registry token. sig_identity says which workflow may
+# have built an image repository; verify_signature runs cosign against the pulled digest.
+#   ARGUS_VERIFY_SIGNATURES=0  take an image on its digest alone (a site with no route to Sigstore's
+#                              public trust root); the default is to verify.
+#   ARGUS_SIGNING_IDENTITY     the certificate identity regexp to expect instead of ours (a fork
+#                              that builds its own images).
+SIG_ISSUER="https://token.actions.githubusercontent.com"
+
+# sig_identity REPO - the certificate identity regexp of the workflow allowed to have built REPO
+# (ghcr.io/<owner>/<name>); 1 when the name is none of ours.
+sig_identity() {
+  if [ -n "${ARGUS_SIGNING_IDENTITY:-}" ]; then printf '%s' "$ARGUS_SIGNING_IDENTITY"; return 0; fi
+  _owner=$(printf '%s' "$1" | awk -F/ 'NF>=3{print $2}')
+  _name=$(printf '%s' "$1" | awk -F/ '{print $NF}')
+  [ -n "$_owner" ] || return 1
+  case "$_name" in
+    argus)         _src="argus-core/.github/workflows/build.yml" ;;
+    argus-probe)   _src="argus-probe/.github/workflows/probe-image.yml" ;;
+    argus-updater) _src="argus-updater/.github/workflows/updater-image.yml" ;;
+    *) return 1 ;;
+  esac
+  printf '^https://github.com/%s/%s@' "$_owner" "$_src"
+}
+
+# verify_signature REPO DIGEST - cosign verify of REPO@DIGEST against the workflow allowed to have
+# built it. 0 when verified (or when verification is off); 1 with VERIFY_ERR set otherwise.
+verify_signature() {
+  VERIFY_ERR=""
+  if [ "${ARGUS_VERIFY_SIGNATURES:-1}" = "0" ]; then
+    log "signature check off (ARGUS_VERIFY_SIGNATURES=0): $1@$2 taken on its digest alone"
+    return 0
+  fi
+  if ! _id=$(sig_identity "$1"); then
+    VERIFY_ERR="no build is known to sign images named $1; refusing it (ARGUS_SIGNING_IDENTITY names the signer of a fork's images)"
+    return 1
+  fi
+  if ! command -v cosign >/dev/null 2>&1; then
+    VERIFY_ERR="cosign is missing from this updater image; cannot verify $1@$2"
+    return 1
+  fi
+  if _out=$(timeout 180 cosign verify --certificate-oidc-issuer "$SIG_ISSUER" --certificate-identity-regexp "$_id" "$1@$2" 2>&1 >/dev/null); then
+    log "$1@$2 signature verified: built by $(printf '%s' "$_id" | sed 's/^^//; s/@$//')"
+    return 0
+  fi
+  VERIFY_ERR="$1@$2 is not signed by its build ($(printf '%s' "$_out" | tail -n1 | cut -c1-160)); refusing to run it"
+  return 1
+}
+
+# pull_verified IMAGE [DIGEST] - docker pull with retries, then two checks before the image may run.
+# First the digest: when one was handed out with the tag (what the core saw the tag point to), the
+# pulled image's repository digest must be it, so an image swapped under the tag in between is
+# refused; without one, the pulled digest is taken as is. Then the signature of that digest
+# (verify_signature): the image must have been signed by the workflow allowed to build it. Tags stay
+# tags (latest, testing, a version). Returns 1 with PULL_ERR set on failure.
 pull_verified() {
   _img="$1"; _want="${2:-}"
   PULL_ERR=""
@@ -94,19 +147,27 @@ pull_verified() {
     _pn=$(( _pn + 1 ))
     sleep 5
   done
-  if [ -z "$_want" ]; then
-    log "no digest was handed out for $_img; applying the tag unverified"
-    return 0
-  fi
-  if ! valid_digest "$_want"; then PULL_ERR="the digest handed out for $_img is malformed"; return 1; fi
   _repo=$(image_repo "$_img")
-  if api GET "/images/$_img/json" | jq -e --arg d "$_repo@$_want" '.RepoDigests // [] | index($d) != null' >/dev/null 2>&1; then
+  if [ -n "$_want" ]; then
+    if ! valid_digest "$_want"; then PULL_ERR="the digest handed out for $_img is malformed"; return 1; fi
+    if ! api GET "/images/$_img/json" | jq -e --arg d "$_repo@$_want" '.RepoDigests // [] | index($d) != null' >/dev/null 2>&1; then
+      _got=$(api GET "/images/$_img/json" | jq -r '(.RepoDigests // []) | join(", ")' 2>/dev/null || true)
+      PULL_ERR="the image pulled for $_img ($_got) is not the one the core handed out ($_want); refusing to run it"
+      return 1
+    fi
     log "$_img verified: $_want"
-    return 0
+    _have="$_want"
+  else
+    if [ "${ARGUS_VERIFY_SIGNATURES:-1}" = "0" ]; then
+      log "no digest was handed out for $_img; applying the tag unverified"
+      return 0
+    fi
+    _have=$(api GET "/images/$_img/json" | jq -r --arg r "$_repo@" '(.RepoDigests // [])[] | select(startswith($r)) | sub("^.*@"; "")' 2>/dev/null | head -n1)
+    if ! valid_digest "$_have"; then PULL_ERR="could not read the digest of the pulled $_img, so its signature can't be checked"; return 1; fi
+    log "no digest was handed out for $_img; the pulled one is $_have"
   fi
-  _got=$(api GET "/images/$_img/json" | jq -r '(.RepoDigests // []) | join(", ")' 2>/dev/null || true)
-  PULL_ERR="the image pulled for $_img ($_got) is not the one the core handed out ($_want); refusing to run it"
-  return 1
+  if ! verify_signature "$_repo" "$_have"; then PULL_ERR="$VERIFY_ERR"; return 1; fi
+  return 0
 }
 
 # read_kv FILE KEY - one value from a KEY=VALUE file, read as data (the file is never sourced: its

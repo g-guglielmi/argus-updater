@@ -13,6 +13,27 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-10-17
+
+### Security
+- **Every image is verified against its build's signature before it runs.** After the pull and
+  the digest check, the updater runs `cosign verify` on the pulled digest: the core image must
+  have been signed by argus-core's build workflow, the probe image by argus-probe's, and the
+  updater's own next image by this repository's. An image that someone pushed with a registry
+  token rather than a build, or one with no signature, is refused with the reason shown on the
+  Updates page, and the running container is left untouched. `ARGUS_VERIFY_SIGNATURES=0` keeps
+  the digest check alone for a site with no route to Sigstore's public trust root;
+  `ARGUS_SIGNING_IDENTITY` names the signer for a fork that builds its own images.
+- **The updater image is signed** (Sigstore, keyless) by its build workflow, like the core and
+  the probe images since core v0.8.13 and probe r31.
+- The image moves from Alpine 3.20 (end of life since April 2026) to Alpine 3.22, pinned by
+  digest; cosign is the official static binary, pinned by version and checksum.
+
+### Notes
+- The first update to this version is checked by digest only (the previous updater can't verify
+  signatures); every update after it is verified. Probe images before r31 and core images before
+  v0.8.13 carry no signature, so this updater refuses to move a container back to them.
+
 ## [0.2.12] - 2026-10-02
 
 ### Added

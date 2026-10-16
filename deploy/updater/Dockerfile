@@ -17,12 +17,19 @@
 #     -v argus-update:/update \
 #     -e ARGUS_CORE_CONTAINER=argus \
 #     ghcr.io/g-guglielmi/argus-updater:latest
-FROM alpine:3.20
+# Pinned by digest as well as by tag (Dependabot in the core repo moves ours; here by hand).
+FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 
 # docker-cli: `docker pull` + talk to the Engine API. curl: Engine API over the unix socket + a
 # best-effort /healthz probe of the new core. jq: read/write the JSON channel files. (No compose
 # plugin: every mode recreates via the Engine API, not `docker compose`.)
-RUN apk add --no-cache curl jq docker-cli
+RUN apk add --no-cache curl jq docker-cli ca-certificates
+
+# cosign verifies the Sigstore signature of every image before it is run (lib/recreate.sh,
+# verify_signature): the official static binary, pinned by version and checksum.
+ARG TARGETARCH=amd64
+ARG COSIGN_VERSION=v3.1.3
+RUN set -eu; case "$TARGETARCH" in amd64) sum=4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71 ;; arm64) sum=c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a ;; *) echo "no cosign checksum for $TARGETARCH" >&2; exit 1 ;; esac; curl -fsSL --retry 3 -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}"; echo "$sum  /usr/local/bin/cosign" | sha256sum -c -; chmod 0755 /usr/local/bin/cosign; /usr/local/bin/cosign version
 
 # Bake the image version so it can be surfaced later if needed; "dev" for local builds.
 ARG UPDATER_VERSION=dev

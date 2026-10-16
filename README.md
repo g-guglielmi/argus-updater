@@ -4,7 +4,8 @@
 
 The shared self-update sidecar for [Argus](https://github.com/g-guglielmi/argus-core). One small
 socket-holding container that recreates a target container on a new image - pull → verify the
-pulled digest against the one Argus handed out with the tag → recreate cloning the running config →
+pulled digest against the one Argus handed out with the tag → verify the image's Sigstore signature
+against the workflow allowed to have built it → recreate cloning the running config →
 health-verify → roll back on failure - used by **both** the core and the
 [argus-probe](https://github.com/g-guglielmi/argus-probe) proxies, so the public-facing core (and the
 outbound-only probes) never need to hold the Docker socket themselves.
@@ -37,6 +38,26 @@ The sidecar updates **itself** the same way - it spawns a throwaway `probe-recre
 mode below) that recreates it and exits. In the `core` mode both write each step of that self-update
 to `updater-status.json` in the shared dir, and every core update keeps its steps in `status.json`,
 so the core's Settings page shows what an update is doing until it ends.
+
+### What is checked before an image runs
+
+Two things, both before the running container is touched:
+
+1. **The digest.** Argus hands out, with every tag, the digest it saw that tag point to. The pulled
+   image's repository digest must be it, so an image swapped under the tag in between is refused.
+   Without a handed-out digest (a plain fleet target), the pulled digest is taken as is.
+2. **The signature.** Every Argus image is signed keyless with Sigstore by the workflow that built
+   it. `cosign verify` must find, for the pulled digest, a signature from the one workflow allowed
+   to build that image: `argus-core`'s `build.yml` for the core, `argus-probe`'s `probe-image.yml`
+   for the proxy, this repository's `updater-image.yml` for the updater itself. An image pushed
+   with a registry token rather than a build, or one with no signature, is refused with the reason
+   shown on Argus's Updates page.
+
+`ARGUS_VERIFY_SIGNATURES=0` on the updater keeps the digest check alone, for a site with no route to
+Sigstore's public trust root (the first verification fetches it, later ones use the cached copy).
+`ARGUS_SIGNING_IDENTITY` replaces the expected identity with a regexp of your own, for a fork that
+builds its own images. Images older than core v0.8.13, probe r31 and updater 0.2.13 carry no
+signature, so a verifying updater will not move a container back to them.
 
 ## Modes
 
