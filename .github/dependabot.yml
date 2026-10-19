@@ -1,6 +1,7 @@
 # Dependabot keeps the pinned things moving with a reviewed pull request: the Alpine base's digest in
-# the Dockerfile and the SHA-pinned actions in the workflow. Merging a Dockerfile bump is a push to
-# deploy/updater/, which publishes :latest (updater-image.yml) like any other; the cosign binary's
+# the Dockerfile and the SHA-pinned actions in the workflow. The pull request builds the image
+# without pushing and runs the tools it carries (updater-image.yml); merging a Dockerfile bump is
+# then a push to deploy/updater/, which publishes :latest like any other. The cosign binary's
 # version and checksums stay ours to bump by hand. The other half of the watch is the core repo's
 # weekly scan (argus-core, scan.yml): every Monday it reads the published image and this checkout.
 version: 2

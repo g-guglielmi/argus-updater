@@ -5,7 +5,11 @@ name: updater-image
 # core and the argus-probe proxies (see deploy/updater/). It rebuilds when its sources change,
 # publishing :latest (+ :sha). A vX.Y.Z tag additionally publishes a version-pinned image (:X.Y.Z,
 # :X.Y) and a GitHub Release whose notes are the matching CHANGELOG.md section, so a deployment can
-# pin an updater version instead of tracking :latest.
+# pin an updater version instead of tracking :latest. A pull request (Dependabot's, or anyone's)
+# runs the tests and builds the image without pushing it, then runs the tools it carries: a base or
+# package bump that would break the build is seen on the pull request, not on the push to main that
+# publishes :latest. Pull requests run with a read-only token and no secrets, so they cannot push,
+# sign or release; publishing stays on main and the tags.
 
 on:
   push:
@@ -13,15 +17,22 @@ on:
     paths:
       - 'deploy/updater/**'
     tags: ['v*']
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/updater/**'
+      - '.github/workflows/updater-image.yml'
   workflow_dispatch:
 
 # Permissions are granted per job: the tests need nothing, the image build pushes to GHCR and
 # publishes the Release on a tag.
 permissions: {}
 
+# Publishing runs queue behind each other and are never cancelled; a pull request's check is its
+# own group, and a newer push to the same pull request cancels the older check.
 concurrency:
-  group: updater-image
-  cancel-in-progress: false
+  group: updater-image-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Guards the config-clone recreate logic (static IP / MAC / aliases / hostname must survive an
@@ -46,7 +57,45 @@ jobs:
       - name: image signature verification test
         run: bash deploy/updater/test/verify_test.sh
 
+  # The pull request's check: the image is built exactly as the publish job builds it, but loaded
+  # into the runner's Docker instead of pushed, and the tools it carries are run once. A Dependabot
+  # bump of the Alpine digest, or of the build actions themselves, fails here before it is merged.
+  build-check:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build without pushing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./deploy/updater
+          file: ./deploy/updater/Dockerfile
+          push: false
+          load: true
+          tags: argus-updater:pr
+          build-args: |
+            UPDATER_VERSION=pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+      - name: Run the tools the image carries
+        run: |
+          set -eu
+          docker run --rm --entrypoint sh argus-updater:pr -c '
+            set -eu
+            echo "alpine $(cat /etc/alpine-release), updater $(cat /etc/argus-updater.version)"
+            cosign version
+            docker --version
+            curl --version | head -n 1
+            jq --version
+            sh -n /usr/local/bin/argus-updater
+            for f in /usr/local/lib/argus-updater/lib/*.sh /usr/local/lib/argus-updater/modes/*.sh /app/healthcheck.sh; do sh -n "$f"; done
+          '
+
   docker:
+    if: github.event_name != 'pull_request'
     permissions:
       contents: write   # publish a Release on tag builds
       packages: write   # push the image to GHCR

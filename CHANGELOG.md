@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Changed
+- **A pull request builds the image before it is merged** (`updater-image.yml`): without pushing,
+  then the tools it carries are run once (cosign, docker-cli, curl, jq, the scripts parsed by the
+  image's own sh), so a base-image or package bump that would break the build is seen on the pull
+  request rather than on the push that publishes `:latest`. Pull requests run with a read-only
+  token and no secrets; publishing stays on `main` and the `vX.Y.Z` tags.
+
 ## [0.2.15] - 2026-10-19
 
 ### Changed
