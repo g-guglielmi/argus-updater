@@ -18,7 +18,7 @@
 #     -e ARGUS_CORE_CONTAINER=argus \
 #     ghcr.io/g-guglielmi/argus-updater:latest
 # Pinned by digest as well as by tag (Dependabot in the core repo moves ours; here by hand).
-FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 # docker-cli: `docker pull` + talk to the Engine API. curl: Engine API over the unix socket + a
 # best-effort /healthz probe of the new core. jq: read/write the JSON channel files. (No compose
