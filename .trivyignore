@@ -1,0 +1,9 @@
+# Read by Trivy when the core repo's weekly scan (argus-core, .github/workflows/scan.yml) checks this
+# repository for misconfigurations and secrets: the deliberate exceptions, each with its reason.
+#
+# DS-0002 "no non-root USER" (deploy/updater/Dockerfile): the updater is the one socket-holding
+# sidecar. It talks to the Docker Engine over /var/run/docker.sock, whose owner and group differ from
+# host to host (Unraid, Debian, Dockhand), so it runs as root like the Engine's own tooling. It is not
+# web-facing and reaches only the socket, GHCR and Sigstore.
+DS-0002
+DS002

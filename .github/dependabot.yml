@@ -1,0 +1,21 @@
+# Dependabot keeps the pinned things moving with a reviewed pull request: the Alpine base's digest in
+# the Dockerfile and the SHA-pinned actions in the workflow. Merging a Dockerfile bump is a push to
+# deploy/updater/, which publishes :latest (updater-image.yml) like any other; the cosign binary's
+# version and checksums stay ours to bump by hand. The other half of the watch is the core repo's
+# weekly scan (argus-core, scan.yml): every Monday it reads the published image and this checkout.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /deploy/updater
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]
+    # The digest and the 3.x line move here; a new Alpine major is a deliberate change, not a weekly one.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]

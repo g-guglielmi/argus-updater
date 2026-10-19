@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Changed
+- **Dependabot watches this repository** (`.github/dependabot.yml`): the Alpine base's digest in
+  the Dockerfile and the workflow's action pins move with a reviewed pull request, as in the core
+  repository. The core repository's weekly scan now reads this checkout too (misconfigurations,
+  secrets); the image's root user is its one deliberate exception, listed in `.trivyignore` with
+  the reason.
+
 ## [0.2.14] - 2026-10-19
 
 ### Security
