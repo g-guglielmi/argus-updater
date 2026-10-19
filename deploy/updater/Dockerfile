@@ -17,14 +17,16 @@
 #     -v argus-update:/update \
 #     -e ARGUS_CORE_CONTAINER=argus \
 #     ghcr.io/g-guglielmi/argus-updater:latest
-# Pinned by digest as well as by tag (Dependabot in the core repo moves ours; here by hand).
-FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+# Pinned by digest as well as by tag: a tag can be re-pointed upstream without any change here, a
+# digest can't. Dependabot (.github/dependabot.yml) moves the digest and the 3.x line with a
+# reviewed pull request, as in the core repo.
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 # docker-cli: `docker pull` + talk to the Engine API. curl: Engine API over the unix socket + a
 # best-effort /healthz probe of the new core. jq: read/write the JSON channel files. (No compose
 # plugin: every mode recreates via the Engine API, not `docker compose`.)
 # `apk upgrade` first: the base is pinned by digest, so its packages (musl, busybox, openssl, ...)
-# would otherwise stay at the pin's versions; every build takes the 3.22 branch's current patches
+# would otherwise stay at the pin's versions; every build takes the 3.24 branch's current patches
 # instead, and so does the weekly rebuild the core repo's scan asks for when a HIGH lands.
 RUN apk upgrade --no-cache && apk add --no-cache curl jq docker-cli ca-certificates
 

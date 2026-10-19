@@ -19,6 +19,10 @@ without a Release; collect those changes under **Unreleased** until the next tag
   repository. The core repository's weekly scan now reads this checkout too (misconfigurations,
   secrets); the image's root user is its one deliberate exception, listed in `.trivyignore` with
   the reason.
+- **Alpine 3.24** (from 3.22): Dependabot's first bump, applied with the digest it proposed; the
+  packages (curl, jq, docker-cli, ca-certificates) now come from the 3.24 branch and `apk upgrade`
+  at build keeps taking its patches. The workflow's actions moved to their current majors in the
+  same batch (Node 24 runtimes).
 
 ## [0.2.14] - 2026-10-19
 
