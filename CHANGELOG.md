@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-10-19
+
 ### Changed
 - **Dependabot watches this repository** (`.github/dependabot.yml`): the Alpine base's digest in
   the Dockerfile and the workflow's action pins move with a reviewed pull request, as in the core
