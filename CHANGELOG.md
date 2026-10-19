@@ -13,6 +13,17 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-10-19
+
+### Security
+- **The image takes Alpine's current patches at every build.** The weekly scan found curl and
+  libcurl 8.14.1-r3 in the image with five HIGH advisories (CVE-2026-5773, CVE-2026-6276,
+  CVE-2026-8286, CVE-2026-8927, CVE-2026-92392), all fixed in 8.14.1-r4, which the 3.22 branch
+  already shipped: the image was simply not rebuilt since. The Dockerfile now runs `apk upgrade`
+  before it adds its packages, so a rebuild patches the base's own packages too, not only the ones
+  it installs. Nothing else changes; the updater updates itself to this image as usual.
+- Alpine 3.22.6.
+
 ## [0.2.13] - 2026-10-17
 
 ### Security

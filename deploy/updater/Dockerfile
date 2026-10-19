@@ -23,7 +23,10 @@ FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9
 # docker-cli: `docker pull` + talk to the Engine API. curl: Engine API over the unix socket + a
 # best-effort /healthz probe of the new core. jq: read/write the JSON channel files. (No compose
 # plugin: every mode recreates via the Engine API, not `docker compose`.)
-RUN apk add --no-cache curl jq docker-cli ca-certificates
+# `apk upgrade` first: the base is pinned by digest, so its packages (musl, busybox, openssl, ...)
+# would otherwise stay at the pin's versions; every build takes the 3.22 branch's current patches
+# instead, and so does the weekly rebuild the core repo's scan asks for when a HIGH lands.
+RUN apk upgrade --no-cache && apk add --no-cache curl jq docker-cli ca-certificates
 
 # cosign verifies the Sigstore signature of every image before it is run (lib/recreate.sh,
 # verify_signature): the official static binary, pinned by version and checksum.
