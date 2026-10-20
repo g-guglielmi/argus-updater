@@ -89,6 +89,18 @@ The outcome shows on the Argus **Updates** page (Argus core, Collectors). Nothin
 host whose Zabbix server runs elsewhere has no such folder and is skipped. `ARGUS_COLLECTORS_DIR`
 points it at another folder.
 
+**The core host's scripts and units.** The same for everything the core VM runs outside the
+container: the OS reporter, the reboot, patch and Zabbix minor-update watchers, the timezone check,
+the sizing tool, the backup tools and their systemd units. The Argus image carries them (`/host-tools`,
+with a manifest, labelled `io.argus.host-tools`); the `core` mode runs that image once, as root, no
+network, with the host's `/usr/local/sbin` and `/etc/systemd/system` bound under `/host` and the
+shared dir at `/update`, and `/argus install-host-tools` writes the files that changed. A container
+cannot reload systemd, so when a unit changed the install leaves `host-tools-apply.json` in the
+shared dir and a path unit on the host does the reload. Only a host set up as a core gets this (the
+reporter's `os-status.json` is the sign; Argus on Unraid or a plain Docker host is skipped). The
+outcome shows on the Updates page (Argus core, Host tools). `ARGUS_HOST_UPDATE_DIR` names the host
+path of the shared dir when the sidecar cannot read it from its own mounts.
+
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash

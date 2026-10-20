@@ -13,6 +13,16 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- **The core host's scripts and units are kept current from the Argus image** (`lib/hosttools.sh`,
+  core mode): after each core update, and daily, the sidecar runs the core's image once with the
+  host's `/usr/local/sbin` and `/etc/systemd/system` bound in and `/argus install-host-tools`
+  writes the files that changed; a path unit on the host reloads systemd when a unit changed. Only a
+  host set up as an Argus core (the reporter's `os-status.json` present) gets this; an image
+  without the `io.argus.host-tools` label, or a host without systemd, is skipped and says so in
+  `host-tools.json`. `ARGUS_HOST_UPDATE_DIR` names the shared dir's host path when the sidecar
+  cannot read it from its own mounts.
+
 ### Changed
 - **A pull request builds the image before it is merged** (`updater-image.yml`): without pushing,
   then the tools it carries are run once (cosign, docker-cli, curl, jq, the scripts parsed by the

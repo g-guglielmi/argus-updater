@@ -14,6 +14,8 @@
 #   updater-status.json (we + our swap helper write) -> a sidecar self-update, step by step
 #   collectors.json (we write)    -> {state, message, version, installed, at}  the core host's
 #                                    collectors, installed from the running core image (lib/collectors.sh)
+#   host-tools.json (we write)    -> the same for the core host's scripts and units (lib/hosttools.sh);
+#                                    host-tools-apply.json is the install's note to the host to reload systemd
 #
 # For each new request it pulls the target image and recreates the core via the shared engine
 # (config-clone + verify + rollback), then writes the outcome back to status.json for the core banner.
@@ -35,6 +37,9 @@ INTERVAL="${ARGUS_UPDATE_INTERVAL:-10}"
 # The core host's collectors (its Zabbix server's external checks): sync_collectors.
 # shellcheck source=/dev/null
 . "$LIBDIR/lib/collectors.sh"
+# The core host's scripts and units (reporter, watchers, sizing, backups): sync_host_tools.
+# shellcheck source=/dev/null
+. "$LIBDIR/lib/hosttools.sh"
 
 # The core is web-facing: accept a passing /healthz as proof of health, on top of stability.
 export ARGUS_VERIFY_HEALTHZ=1
@@ -248,6 +253,7 @@ while true; do
   heartbeat $((INTERVAL * 3 + 1800))   # a round may include a whole update
   report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
   sync_collectors     # the core host's Zabbix runs the running image's collectors
+  sync_host_tools     # the core host runs the running image's scripts and units
   report_updater      # keep our reported sidecar version current
   check_updater_request   # act on a "update the sidecar" request from the core
   check_self_update       # settle one whose helper is gone
