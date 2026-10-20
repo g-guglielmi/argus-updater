@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-10-21
+
 ### Added
 - **The core host's scripts and units are kept current from the Argus image** (`lib/hosttools.sh`,
   core mode): after each core update, and daily, the sidecar runs the core's image once with the
