@@ -101,6 +101,14 @@ reporter's `os-status.json` is the sign; Argus on Unraid or a plain Docker host 
 outcome shows on the Updates page (Argus core, Host tools). `ARGUS_HOST_UPDATE_DIR` names the host
 path of the shared dir when the sidecar cannot read it from its own mounts.
 
+The same holds for a **probe VM** in probe-watch mode: the probe image carries the VM's host side
+(the OS reporter, the console menu, their units) and `python3 /host-tools/install-host-tools.py`
+writes what changed. The sign is `host-tools.json` in the proxy's data folder (the VM image writes
+it at build); a probe as a container elsewhere is skipped. The outcome goes to Argus in the
+sidecar's own check-in (`host_tools`) and into that file, written by the probe image since the
+sidecar's mount of the folder is read-only. `ARGUS_HOST_PROBE_DIR` names the host path of the data
+folder when the sidecar cannot read it from its own mounts.
+
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash

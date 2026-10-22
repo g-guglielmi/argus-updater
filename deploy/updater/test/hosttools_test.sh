@@ -106,4 +106,58 @@ ARGUS_HOST_UPDATE_DIR=/mnt/user/appdata/argus-update; IMAGE="sha256:ggg"; DOCKER
 sync_host_tools
 check "the configured path is used" "$(grep -c -- 'src=/mnt/user/appdata/argus-update,dst=/update .*--state-dir /mnt/user/appdata/argus-update' "$TMP/calls")" 1
 
+echo "probe-watch: the probe VM's host tools, through the read-only data folder"
+HT_ROLE=probe; PROBE_DIR="$TMP/probe"; mkdir -p "$PROBE_DIR"
+# shellcheck source=/dev/null
+. "$DIR/lib/hosttools.sh"      # re-sourced with the probe role: fresh state
+unset ARGUS_HOST_UPDATE_DIR
+resolve_proxy() { echo argus-probe; }
+PIMAGE="sha256:p1"; PMOUNT=1; LABELLED=1
+api() {
+  case "$2" in
+    /containers/argus-probe/json) printf '{"Image":"%s"}' "$PIMAGE" ;;
+    /containers/selfid/json) if [ "$PMOUNT" = 1 ]; then printf '{"Mounts":[{"Destination":"%s","Source":"/docker/argus-probe"}]}' "$PROBE_DIR"; else echo '{"Mounts":[]}'; fi ;;
+    /images/*) if [ "$LABELLED" = 1 ]; then echo '{"Config":{"Labels":{"io.argus.host-tools":"/host-tools"}}}'; else echo '{"Config":{"Labels":null}}'; fi ;;
+  esac
+}
+rm -f "$TMP/calls"
+
+echo "  a container probe (no host-tools.json in the data folder) is skipped, nothing written"
+sync_host_tools
+check "no docker run"    "$(calls)" 0
+check "reported skipped" "$(ht_report | jq -r .state)" skipped
+check "says why"         "$(ht_report | jq -r '.message | test("not set up as a probe VM")')" true
+
+echo "  a probe VM: the installer runs from the probe image, the image writes the outcome"
+echo '{"state":"ok","version":"image-build"}' > "$PROBE_DIR/host-tools.json"
+PIMAGE="sha256:p2"; DOCKER_RC=0
+DOCKER_OUT='{"version":"7.0.33-r1","installed":["/usr/local/sbin/argus-console"],"unchanged":[],"units_changed":[],"apply":false}'
+sync_host_tools
+check "two docker runs (the install, then the status file)" "$(calls)" 2
+check "the install run" \
+  "$(grep -c -- '--entrypoint python3 sha256:p2 /host-tools/install-host-tools.py --root /host --state-dir /docker/argus-probe --update-dir /update' "$TMP/calls")" 1
+check "the status write" "$(grep -c -- 'src=/docker/argus-probe,dst=/update --entrypoint sh sha256:p2 -c' "$TMP/calls")" 1
+check "reported ok"      "$(ht_report | jq -r .state)" ok
+check "with the version" "$(ht_report | jq -r .version)" 7.0.33-r1
+check "in the check-in"  "$(jq -nc --argjson ht "$(ht_report)" '{host_tools:$ht}' | jq -r .host_tools.state)" ok
+
+echo "  an image without the label is skipped, once"
+PIMAGE="sha256:p2b"; LABELLED=0
+sync_host_tools
+check "no install run"   "$(grep -c -- 'install-host-tools.py' "$TMP/calls")" 1
+check "reported skipped" "$(ht_report | jq -r .state)" skipped
+sync_host_tools
+check "not retried for the same image" "$(calls)" 3
+LABELLED=1
+
+echo "  the host path of the data folder must be known"
+PIMAGE="sha256:p3"; PMOUNT=0
+sync_host_tools
+check "no docker run"    "$(calls)" 3
+check "reported failed"  "$(ht_report | jq -r .state)" failed
+check "says what to set" "$(ht_report | jq -r '.message | test("ARGUS_HOST_PROBE_DIR")')" true
+ARGUS_HOST_PROBE_DIR=/mnt/user/appdata/argus-probe; PIMAGE="sha256:p4"
+sync_host_tools
+check "the configured path is used" "$(grep -c -- 'src=/mnt/user/appdata/argus-probe,dst=/update --entrypoint python3' "$TMP/calls")" 1
+
 exit $fail
