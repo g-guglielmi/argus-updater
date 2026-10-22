@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-10-23
+
 ### Added
 - **The probe VM's host side is kept current from the probe image** (`lib/hosttools.sh`, probe-watch
   mode): after each probe update, and daily, the sidecar runs the probe image once against the
