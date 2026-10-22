@@ -35,6 +35,12 @@ PROBE_IMAGE="${ARGUS_PROBE_IMAGE:-ghcr.io/g-guglielmi/argus-probe}"
 UPDATER_REPO="${ARGUS_UPDATER_REPO:-ghcr.io/g-guglielmi/argus-updater}"
 UPDATER_VERSION="$(cat /etc/argus-updater.version 2>/dev/null || echo dev)"
 RECREATE_NOUN="proxy"
+# The probe VM's host side (the OS reporter, the console menu, their units) rides the probe image;
+# after each probe update we run that image once against the host (lib/hosttools.sh, probe role).
+# Our mount of the proxy's data folder is read-only, so the outcome also rides our check-in.
+HT_ROLE=probe
+PROBE_DIR="${ARGUS_PROBE_DIR:-/probe}"
+. "$LIBDIR/lib/hosttools.sh"
 
 log()      { echo "argus-updater[watch]: $*"; }
 progress() { echo "argus-updater[watch]: $*"; }
@@ -71,7 +77,7 @@ while true; do
     # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
     # proxy version (the proxy reports its own); updater_version is our sidecar's own version.
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg uv "$UPDATER_VERSION" '{selfupdate:true, updater_version:$uv, restarts:true}')" \
+      -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
@@ -161,5 +167,8 @@ while true; do
     fi
   fi
 
+  # The host's scripts and units, from the running probe image: after an update, daily, or ten
+  # minutes after a failure (a container probe elsewhere is skipped once per image).
+  sync_host_tools
   sleep "$INTERVAL"
 done
