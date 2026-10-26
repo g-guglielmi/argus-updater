@@ -20,7 +20,7 @@
 # Pinned by digest as well as by tag: a tag can be re-pointed upstream without any change here, a
 # digest can't. Dependabot (.github/dependabot.yml) moves the digest and the 3.x line with a
 # reviewed pull request, as in the core repo.
-FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 # docker-cli: `docker pull` + talk to the Engine API. curl: Engine API over the unix socket + a
 # best-effort /healthz probe of the new core. jq: read/write the JSON channel files. (No compose

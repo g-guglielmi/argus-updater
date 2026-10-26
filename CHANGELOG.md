@@ -13,6 +13,18 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-10-27
+
+### Security
+- **Rebuilt for Alpine's fixes.** The weekly scan found three packages in the image with HIGH
+  advisories that the 3.24 branch has since fixed: curl and libcurl 8.22.0-r0 (CVE-2026-92392, a
+  use-after-free on HTTP/2 uploads; fixed in 8.23.0-r0), brotli-libs 1.2.0-r1 (CVE-2026-111497, an
+  out-of-bounds write in the decoder; fixed in 1.2.1-r0) and docker-cli 29.8.2-r1, whose Go runtime
+  carried CVE-2026-111943 (x509 intermediate certificates) and CVE-2026-78669 (HTTP/2 SETTINGS
+  flood), fixed in 29.9.2-r0. The build's `apk upgrade` takes them all; the base is also moved to
+  the current `alpine:3.24` digest (3.24.3). Nothing else changes; the updater updates itself to
+  this image as usual.
+
 ## [0.2.17] - 2026-10-23
 
 ### Added
