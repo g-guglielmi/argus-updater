@@ -13,6 +13,12 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Changed
+- **Every build takes Alpine's current packages.** The `apk upgrade` layer came from the build cache
+  whenever its line and the base were unchanged, so a rebuild for an Alpine fix could ship the old
+  packages (0.2.18 got them only because its base digest moved too). The Dockerfile now declares
+  `APK_REFRESH` before that line and CI passes its run id, so the layer is built afresh every time.
+
 ## [0.2.18] - 2026-10-27
 
 ### Security

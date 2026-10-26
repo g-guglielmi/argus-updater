@@ -81,6 +81,7 @@ jobs:
           tags: argus-updater:pr
           build-args: |
             UPDATER_VERSION=pr-${{ github.event.pull_request.number }}
+            APK_REFRESH=${{ github.run_id }}
           cache-from: type=gha
       - name: Run the tools the image carries
         run: |
@@ -168,6 +169,7 @@ jobs:
           sbom: true
           build-args: |
             UPDATER_VERSION=${{ steps.version.outputs.value }}
+            APK_REFRESH=${{ github.run_id }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

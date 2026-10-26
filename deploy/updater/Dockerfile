@@ -28,6 +28,9 @@ FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c03
 # `apk upgrade` first: the base is pinned by digest, so its packages (musl, busybox, openssl, ...)
 # would otherwise stay at the pin's versions; every build takes the 3.24 branch's current patches
 # instead, and so does the weekly rebuild the core repo's scan asks for when a HIGH lands.
+# APK_REFRESH (CI passes its run id) changes on every build, so this layer never comes from the build
+# cache: an unchanged line here would otherwise reuse the packages of the build that cached it.
+ARG APK_REFRESH=dev
 RUN apk upgrade --no-cache && apk add --no-cache curl jq docker-cli ca-certificates
 
 # cosign verifies the Sigstore signature of every image before it is run (lib/recreate.sh,
