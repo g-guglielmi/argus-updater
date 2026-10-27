@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-10-27
+
 ### Changed
 - **Every build takes Alpine's current packages.** The `apk upgrade` layer came from the build cache
   whenever its line and the base were unchanged, so a rebuild for an Alpine fix could ship the old
