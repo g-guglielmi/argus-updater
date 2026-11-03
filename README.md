@@ -109,6 +109,13 @@ sidecar's own check-in (`host_tools`) and into that file, written by the probe i
 sidecar's mount of the folder is read-only. `ARGUS_HOST_PROBE_DIR` names the host path of the data
 folder when the sidecar cannot read it from its own mounts.
 
+**The host's LAN address** (probe-watch, `lib/hostaddr.sh`). The Probes page shows each probe's LAN
+address, and a proxy on Docker's bridge sees only its own 172.17.x one. So the sidecar runs its own
+image once with the host's network (`<sidecar name>-addr`, read-only, no capabilities, as nobody,
+removed when done) and reads the source address and gateway of the host's route to the internet.
+It does so when the sidecar starts and after each start of the proxy (an update, a restart), not on
+a timer, and an hour after a failed try; every check-in carries the result (`host_lan`).
+
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash

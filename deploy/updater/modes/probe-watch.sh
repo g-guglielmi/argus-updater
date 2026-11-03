@@ -41,6 +41,9 @@ RECREATE_NOUN="proxy"
 HT_ROLE=probe
 PROBE_DIR="${ARGUS_PROBE_DIR:-/probe}"
 . "$LIBDIR/lib/hosttools.sh"
+# The host's LAN address for the Probes page (lib/hostaddr.sh): read when we start and after each
+# start of the proxy, and carried by every check-in.
+. "$LIBDIR/lib/hostaddr.sh"
 
 log()      { echo "argus-updater[watch]: $*"; }
 progress() { echo "argus-updater[watch]: $*"; }
@@ -75,10 +78,11 @@ while true; do
   esac
 
   if [ -n "$PROBE_TOKEN" ] && [ -n "$CHECKIN_URL" ]; then
+    host_lan "$(resolve_proxy 2>/dev/null || true)"
     # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
     # proxy version (the proxy reports its own); updater_version is our sidecar's own version.
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht}')" \
+      -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" --argjson hl "$(ha_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht, host_lan:$hl}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     # Argus asks for the next round sooner while its Updates page is open or an update waits for us.
     WAIT=$(round_wait "$RESP" "$INTERVAL")

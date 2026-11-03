@@ -13,6 +13,16 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-11-04
+
+### Added
+- **A probe's sidecar reports its host's LAN address.** A proxy on Docker's bridge sees only its
+  own 172.17.x address, so the Probes page had no LAN address for it, or the address of whatever
+  NAT sat on the way (a Tailscale exit node, a VPN router). The sidecar now runs its own image once
+  with the host's network (about a second, `<sidecar name>-addr`, removed when done) and reports the
+  host's address and gateway with every check-in. It does so when it starts and after each start
+  of the proxy, not on a timer: a LAN address rarely changes while the host stays up.
+
 ## [0.2.21] - 2026-11-03
 
 ### Added
