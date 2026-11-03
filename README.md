@@ -10,7 +10,7 @@ health-verify → roll back on failure - used by **both** the core and the
 [argus-probe](https://github.com/g-guglielmi/argus-probe) proxies, so the public-facing core (and the
 outbound-only probes) never need to hold the Docker socket themselves.
 
-- **`deploy/updater/`** - the `argus-updater` image (`ghcr.io/g-guglielmi/argus-updater`): the shared
+- **`deploy/updater/`** - the `argus-updater` image (`ghcr.io/g-guglielmi/argus-updater`, for `linux/amd64` and `linux/arm64`): the shared
   recreate engine (`lib/recreate.sh`), the per-mode scripts (`modes/`), and a compose example.
 
 ## How it works

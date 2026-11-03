@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-11-03
+
+### Added
+- **The updater image runs on arm64 too.** Every build publishes `linux/amd64` and `linux/arm64`
+  under the same tags and one signature, so a probe on a Raspberry Pi 4 or 5 (64-bit OS) gets its
+  sidecar. Nothing changes on x86: Docker picks the image for its platform.
+
 ## [0.2.20] - 2026-11-03
 
 ### Changed
