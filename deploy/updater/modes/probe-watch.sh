@@ -63,6 +63,7 @@ resolve_proxy() {
 
 log "starting (poll ${INTERVAL}s, proxy=${PROXY_CONTAINER:-<by image $PROBE_IMAGE>})"
 WAIT="$INTERVAL"
+MISSED=0   # check-ins in a row that got no answer from Argus
 while true; do
   heartbeat $((INTERVAL * 2 + 1800))   # a round may include a proxy recreate
   # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
@@ -85,7 +86,14 @@ while true; do
       -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" --argjson hl "$(ha_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht, host_lan:$hl}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     # Argus asks for the next round sooner while its Updates page is open or an update waits for us.
-    WAIT=$(round_wait "$RESP" "$INTERVAL")
+    # No answer at all (Argus restarting, the network gone): try again soon, backing off to the round.
+    if answered "$RESP"; then
+      MISSED=0
+      WAIT=$(round_wait "$RESP" "$INTERVAL")
+    else
+      MISSED=$((MISSED + 1))
+      WAIT=$(missed_wait "$MISSED" "$INTERVAL")
+    fi
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
     UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)

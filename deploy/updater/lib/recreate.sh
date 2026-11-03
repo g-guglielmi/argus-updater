@@ -81,6 +81,21 @@ round_wait() {
   if [ "$_rw" -lt 5 ]; then echo 5; elif [ "$_rw" -gt "$2" ]; then echo "$2"; else echo "$_rw"; fi
 }
 
+# answered RESPONSE - whether RESPONSE is a check-in answer from Argus (an object carrying the fleet
+# target), not an error, an empty reply or nothing at all.
+answered() { printf '%s' "$1" | jq -e 'type == "object" and has("target")' >/dev/null 2>&1; }
+
+# missed_wait MISSED INTERVAL - seconds until the next round after MISSED check-ins in a row got no
+# answer (Argus restarting during its own update, the network gone): 15, then 30, 60, ... up to
+# INTERVAL. A core restart then costs seconds, not a whole round: before 0.2.23 the sidecar slept
+# INTERVAL, and an update queued right after the restart waited for it.
+missed_wait() {
+  _mw=15
+  _n=${1:-1}
+  while [ "$_n" -gt 1 ] && [ "$_mw" -lt "$2" ]; do _mw=$((_mw * 2)); _n=$((_n - 1)); done
+  if [ "$_mw" -gt "$2" ]; then echo "$2"; else echo "$_mw"; fi
+}
+
 # valid_digest DIGEST - the shape of a content digest the core hands out with a tag.
 valid_digest() {
   [ "${#1}" -eq 71 ] || return 1

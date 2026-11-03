@@ -13,6 +13,14 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.23] - 2026-11-04
+
+### Fixed
+- **A probe's sidecar is back within seconds after a core restart.** A check-in that got no answer
+  (Argus restarting during its own update, the network gone) made the sidecar sleep its whole round,
+  5 minutes, so probe updates queued right after a core update waited for it, and every sidecar
+  slept in step. It now tries again after 15 seconds, then 30, 60, ... up to its round.
+
 ## [0.2.22] - 2026-11-04
 
 ### Added

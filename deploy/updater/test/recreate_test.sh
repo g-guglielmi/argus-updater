@@ -67,5 +67,19 @@ for c in '{"target":"latest"}|300' '|300' '{"next":15}|15' '{"next":1}|5' '{"nex
   [ "$got" = "${c#*|}" ] && echo "  ok   ${c%|*} -> $got" || { echo "  FAIL round_wait ${c%|*}: <$got>, want ${c#*|}"; fail=1; }
 done
 
+echo "answered: only a check-in answer counts"
+for c in '{"target":"latest"}|yes' '{"target":"","next":15}|yes' '|no' '{"error":"too many requests"}|no' '<html>502</html>|no' '[]|no'; do
+  if answered "${c%|*}"; then got=yes; else got=no; fi
+  [ "$got" = "${c#*|}" ] && echo "  ok   ${c%|*} -> $got" || { echo "  FAIL answered ${c%|*}: <$got>, want ${c#*|}"; fail=1; }
+done
+
+echo "missed_wait: 15, 30, 60, ... up to the interval"
+for c in '1|15' '2|30' '3|60' '4|120' '5|240' '6|300' '40|300'; do
+  got=$(missed_wait "${c%|*}" 300)
+  [ "$got" = "${c#*|}" ] && echo "  ok   missed ${c%|*} -> $got" || { echo "  FAIL missed_wait ${c%|*}: <$got>, want ${c#*|}"; fail=1; }
+done
+got=$(missed_wait 1 10)
+[ "$got" = 10 ] && echo "  ok   a round shorter than 15 s is kept" || { echo "  FAIL missed_wait 1 10: <$got>"; fail=1; }
+
 echo "-----"
 if [ "$fail" -eq 0 ]; then echo "PASS"; exit 0; else echo "FAIL"; exit 1; fi
