@@ -59,6 +59,7 @@ resolve_proxy() {
 }
 
 log "starting (poll ${INTERVAL}s, proxy=${PROXY_CONTAINER:-<by image $PROBE_IMAGE>})"
+WAIT="$INTERVAL"
 while true; do
   heartbeat $((INTERVAL * 2 + 1800))   # a round may include a proxy recreate
   # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
@@ -79,6 +80,8 @@ while true; do
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
       -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
+    # Argus asks for the next round sooner while its Updates page is open or an update waits for us.
+    WAIT=$(round_wait "$RESP" "$INTERVAL")
     TARGET=$(echo "$RESP" | jq -r '.target // empty' 2>/dev/null || true)
     UPDATE=$(echo "$RESP" | jq -r '.update // empty' 2>/dev/null || true)
     UPDATER_UPDATE=$(echo "$RESP" | jq -r '.updater_update // empty' 2>/dev/null || true)
@@ -168,7 +171,10 @@ while true; do
   fi
 
   # The host's scripts and units, from the running probe image: after an update, daily, or ten
-  # minutes after a failure (a container probe elsewhere is skipped once per image).
+  # minutes after a failure (a container probe elsewhere is skipped once per image). When they were
+  # just installed, the next round goes now: its check-in reports them, so the Updates page doesn't
+  # show them "updating" for a whole interval after they went in.
   sync_host_tools
-  sleep "$INTERVAL"
+  if [ "$HT_RAN" = "1" ]; then continue; fi
+  sleep "$WAIT"
 done

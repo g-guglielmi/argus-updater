@@ -72,6 +72,15 @@ valid_tag() {
   [ "${#1}" -le 64 ]
 }
 
+# round_wait RESPONSE INTERVAL - seconds until the next round: INTERVAL, or sooner when Argus asks for
+# it in its check-in answer ("next": the Updates page is open, or an update waits for us), held to
+# 5..INTERVAL. A sidecar from before 0.2.20 always waited INTERVAL.
+round_wait() {
+  _rw=$(printf '%s' "$1" | jq -r '.next // empty' 2>/dev/null | tr -d '\r' || true)
+  case "$_rw" in ''|*[!0-9]*) echo "$2"; return 0;; esac
+  if [ "$_rw" -lt 5 ]; then echo 5; elif [ "$_rw" -gt "$2" ]; then echo "$2"; else echo "$_rw"; fi
+}
+
 # valid_digest DIGEST - the shape of a content digest the core hands out with a tag.
 valid_digest() {
   [ "${#1}" -eq 71 ] || return 1

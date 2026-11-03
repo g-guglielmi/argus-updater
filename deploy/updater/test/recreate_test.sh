@@ -61,5 +61,11 @@ prim=$(primary_net "$INS" | tr -d '\r')
 extras=$(for n in $(user_nets "$INS" | tr -d '\r'); do [ "$n" = "$prim" ] && continue; printf '%s ' "$n"; done)
 [ "$extras" = "net2 " ] && echo "  ok   extras to connect = net2" || { echo "  FAIL extras: <$extras>"; fail=1; }
 
+echo "round_wait: the interval, or Argus's next held to 5..interval"
+for c in '{"target":"latest"}|300' '|300' '{"next":15}|15' '{"next":1}|5' '{"next":900}|300' '{"next":"1; reboot"}|300'; do
+  got=$(round_wait "${c%|*}" 300)
+  [ "$got" = "${c#*|}" ] && echo "  ok   ${c%|*} -> $got" || { echo "  FAIL round_wait ${c%|*}: <$got>, want ${c#*|}"; fail=1; }
+done
+
 echo "-----"
 if [ "$fail" -eq 0 ]; then echo "PASS"; exit 0; else echo "FAIL"; exit 1; fi

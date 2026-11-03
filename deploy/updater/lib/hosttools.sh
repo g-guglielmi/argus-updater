@@ -35,6 +35,7 @@ HT_STATE=""   # ok | failed | skipped
 HT_AT=0       # when it ran (epoch seconds)
 HT_DIR=""     # the host path of the state folder
 HT_DOC=""     # the last status document (JSON), for the probe's check-in
+HT_RAN=0      # whether the last sync_host_tools ran an install (its outcome is new news)
 command -v epoch >/dev/null 2>&1 || epoch() { date +%s; }
 command -v now >/dev/null 2>&1 || now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
@@ -94,8 +95,10 @@ host_tools_due() {
   esac
 }
 
-# sync_host_tools - one round: install the managed image's host tools when due.
+# sync_host_tools - one round: install the managed image's host tools when due. HT_RAN says whether
+# it ran, so a probe's sidecar reports the outcome at once instead of at its next round.
 sync_host_tools() {
+  HT_RAN=0
   case "$HT_ROLE" in
     probe) _hname=$(resolve_proxy 2>/dev/null || true) ;;
     *)     _hname=$(resolve_core 2>/dev/null || true) ;;
@@ -105,7 +108,7 @@ sync_host_tools() {
   [ -z "$_himg" ] && return 0
   _hnow=$(epoch)
   host_tools_due "$_himg" "$_hnow" || return 0
-  HT_IMG="$_himg"; HT_AT="$_hnow"
+  HT_IMG="$_himg"; HT_AT="$_hnow"; HT_RAN=1
   if [ "$HT_ROLE" = "probe" ]; then
     if [ ! -f "${PROBE_DIR:-/probe}/host-tools.json" ]; then
       # Nothing is written here: that file is the sign of a probe VM, and this host has none.

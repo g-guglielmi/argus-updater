@@ -13,6 +13,18 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-11-03
+
+### Changed
+- **A probe's sidecar reports new host tools at once.** It installs a probe update's host tools
+  right after the update, but reported them only at its next round, up to five minutes later, so
+  the Updates page showed them "updating" all that while. When it has just installed them it now
+  checks in again straight away.
+- **Faster rounds when Argus asks for them.** A probe's sidecar takes the `next` of Argus's
+  check-in answer (held to 5 seconds..its interval): Argus asks for 15 seconds while someone has its
+  Updates page open or an update waits for the sidecar, so a click there is taken within seconds.
+  An older Argus never asks, and the interval stays as it was.
+
 ## [0.2.19] - 2026-10-27
 
 ### Changed
