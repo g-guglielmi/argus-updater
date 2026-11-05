@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.24] - 2026-11-05
+
 ### Fixed
 - **A new version that crashes on start is rolled back within seconds, and the failure says why.**
   The health check waited its whole 90 seconds while a broken core restarted over and over; it now
