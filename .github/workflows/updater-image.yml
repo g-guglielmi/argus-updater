@@ -60,6 +60,8 @@ jobs:
         run: bash deploy/updater/test/job_test.sh
       - name: image signature verification test
         run: bash deploy/updater/test/verify_test.sh
+      - name: health check and crash-loop rollback test
+        run: bash deploy/updater/test/health_test.sh
 
   # The pull request's check: the image is built exactly as the publish job builds it, but loaded
   # into the runner's Docker instead of pushed, and the tools it carries are run once. A Dependabot

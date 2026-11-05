@@ -22,6 +22,8 @@
 #                          stability-only (an active Zabbix proxy has no HTTP endpoint to probe)
 #   ARGUS_HEALTH_STABLE  - seconds the new container must stay up to pass (default 20)
 #   ARGUS_VERIFY_TIMEOUT - give up (and roll back) after this long (default 90)
+#   ARGUS_VERIFY_MAX_RESTARTS - roll back at once when the new container has restarted this many
+#                          times (default 3): a crash loop never gets healthy, no need to wait it out
 #
 # recreate_container NAME NEW_IMAGE -> 0 on success; 1 on failure with RECREATE_ERR set to the
 # reason (already rolled back to the previous container).
@@ -39,6 +41,7 @@ heartbeat() {
 RECREATE_NOUN="${RECREATE_NOUN:-container}"
 HEALTH_STABLE="${ARGUS_HEALTH_STABLE:-20}"
 VERIFY_TIMEOUT="${ARGUS_VERIFY_TIMEOUT:-90}"
+VERIFY_MAX_RESTARTS="${ARGUS_VERIFY_MAX_RESTARTS:-3}"
 
 # api METHOD PATH [BODY] - talk to the Docker Engine API over the unix socket.
 api() {
@@ -201,17 +204,40 @@ read_kv() { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | head -n1; }
 # verify NAME - return 0 once the container looks healthy: it stays Running and not Restarting for
 # HEALTH_STABLE seconds (a crash-loop guard - a bad image that starts then exits never reaches a
 # stable window). When ARGUS_VERIFY_HEALTHZ=1 and the container has an IP on a shared network, a
-# passing GET :8080/healthz short-circuits to healthy. Return 1 on timeout.
+# passing GET :8080/healthz short-circuits to healthy. Return 1 on timeout, and at once when it
+# keeps crashing: restarted VERIFY_MAX_RESTARTS times, or exited and staying down (no restart
+# policy, or stopped by hand) for three looks in a row. VERIFY_WHY then says which, with the
+# container's last telling log line (its logs go with it on the rollback).
 verify() {
   _name="$1"
+  VERIFY_WHY=""
+  _json=""
   sleep 5   # brief grace for startup
   _need=$(( HEALTH_STABLE / 3 )); [ "$_need" -lt 1 ] && _need=1
   _stable=0
+  _down=0
   _end=$(( $(date +%s) + VERIFY_TIMEOUT ))
   while [ "$(date +%s)" -lt "$_end" ]; do
     _json=$(api GET "/containers/$_name/json")
     _running=$(printf '%s' "$_json" | jq -r '.State.Running // false')
     _restarting=$(printf '%s' "$_json" | jq -r '.State.Restarting // false')
+    _restarts=$(printf '%s' "$_json" | jq -r '.RestartCount // 0')
+    _status=$(printf '%s' "$_json" | jq -r '.State.Status // empty')
+    _exit=$(printf '%s' "$_json" | jq -r '.State.ExitCode // 0')
+    if [ "$_restarts" -ge "$VERIFY_MAX_RESTARTS" ] 2>/dev/null; then
+      VERIFY_WHY="it crashed on start, $_restarts restarts (exit code $_exit)"
+      _crash_line "$_name" "$_json"
+      return 1
+    fi
+    case "$_status" in
+      exited|dead) _down=$(( _down + 1 )) ;;
+      *) _down=0 ;;
+    esac
+    if [ "$_down" -ge 3 ]; then
+      VERIFY_WHY="it stopped and stayed down (exit code $_exit)"
+      _crash_line "$_name" "$_json"
+      return 1
+    fi
     if [ "$_running" != "true" ] || [ "$_restarting" = "true" ]; then
       _stable=0; sleep 3; continue
     fi
@@ -225,7 +251,41 @@ verify() {
     [ "$_stable" -ge "$_need" ] && return 0
     sleep 3
   done
+  VERIFY_WHY="it did not become healthy in ${VERIFY_TIMEOUT}s"
+  _crash_line "$_name" "$_json"
   return 1
+}
+
+# _crash_line NAME INSPECT - append the container's last telling log line to VERIFY_WHY.
+_crash_line() {
+  _tty=$(printf '%s' "$2" | jq -r '.Config.Tty // false')
+  _line=$(api GET "/containers/$1/logs?stdout=1&stderr=1&tail=80" 2>/dev/null | log_last_line "$_tty")
+  [ -n "$_line" ] && VERIFY_WHY="$VERIFY_WHY: $_line"
+  return 0
+}
+
+# log_last_line TTY - read a container's logs from the Engine API on stdin and print its most
+# telling line: the first line of the last Go panic when there is one, else the last non-empty
+# line; printable ASCII only, at most 300 characters. A container without a TTY sends its logs in
+# frames (8-byte header: stream, 0, 0, 0, then the length big-endian), which are taken apart here.
+log_last_line() {
+  od -An -v -tu1 | awk -v tty="$1" '
+    function take(l) { if (l == "") return; last = l; if (l ~ /^panic: /) pan = l }
+    { for (i = 1; i <= NF; i++) b[n++] = $i + 0 }
+    END {
+      line = ""; p = 0
+      if (tty == "true") {
+        for (; p < n; p++) { c = b[p]; if (c == 10) { take(line); line = "" } else if (c >= 32 && c < 127) line = line sprintf("%c", c) }
+      } else {
+        while (p + 8 <= n) {
+          sz = b[p+4] * 16777216 + b[p+5] * 65536 + b[p+6] * 256 + b[p+7]; p += 8
+          for (j = 0; j < sz && p < n; j++) { c = b[p++]; if (c == 10) { take(line); line = "" } else if (c >= 32 && c < 127) line = line sprintf("%c", c) }
+        }
+      }
+      take(line)
+      r = (pan != "") ? pan : last
+      print substr(r, 1, 300)
+    }'
 }
 
 # --- container config cloning (pure: take the inspect JSON, emit request bodies; unit-tested) ---
@@ -368,8 +428,8 @@ recreate_container() {
     api POST "/containers/$NAME/stop?t=10" >/dev/null 2>&1 || true
     api DELETE "/containers/$NAME?force=true" >/dev/null 2>&1 || true
     rollback
-    RECREATE_ERR="the new $RECREATE_NOUN did not become healthy in time - rolled back to the previous version"
-    log "verify failed - rolled back"
+    RECREATE_ERR="the new $RECREATE_NOUN failed its health check, rolled back to the previous version: ${VERIFY_WHY:-it did not become healthy in time}"
+    log "verify failed - rolled back: ${VERIFY_WHY:-timeout}"
     return 1
   fi
 

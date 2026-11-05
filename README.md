@@ -6,7 +6,7 @@ The shared self-update sidecar for [Argus](https://github.com/g-guglielmi/argus-
 socket-holding container that recreates a target container on a new image - pull → verify the
 pulled digest against the one Argus handed out with the tag → verify the image's Sigstore signature
 against the workflow allowed to have built it → recreate cloning the running config →
-health-verify → roll back on failure - used by **both** the core and the
+health-verify (a crash loop rolls back after 3 restarts, `ARGUS_VERIFY_MAX_RESTARTS`, with its last log line in the error) → roll back on failure - used by **both** the core and the
 [argus-probe](https://github.com/g-guglielmi/argus-probe) proxies, so the public-facing core (and the
 outbound-only probes) never need to hold the Docker socket themselves.
 

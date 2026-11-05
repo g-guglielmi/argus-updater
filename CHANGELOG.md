@@ -13,6 +13,13 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Fixed
+- **A new version that crashes on start is rolled back within seconds, and the failure says why.**
+  The health check waited its whole 90 seconds while a broken core restarted over and over; it now
+  rolls back once the new container has restarted 3 times (`ARGUS_VERIFY_MAX_RESTARTS`), or when it
+  stopped and stays down. The failure in Updates carries the container's last telling log line (a
+  crash's first line), since its logs go with it on the rollback. The same for probe updates.
+
 ## [0.2.23] - 2026-11-04
 
 ### Fixed
