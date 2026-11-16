@@ -13,6 +13,18 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.25] - 2026-11-16
+
+### Security
+- **Rebuilt on current Alpine packages.** The image's Docker CLI (`docker-cli`) moves from 29.9.2
+  to 29.9.3, which fixes two high-severity denial-of-service bugs in libraries it bundles
+  (CVE-2026-116587 in go-jose, CVE-2026-116591 in klauspost/compress). The weekly image scan
+  flagged them. No change to the updater itself.
+
+### Changed
+- CI only: `softprops/action-gh-release` 3.0.4, `docker/login-action` 4.8.0,
+  `sigstore/cosign-installer` 4.1.3.
+
 ## [0.2.24] - 2026-11-05
 
 ### Fixed
