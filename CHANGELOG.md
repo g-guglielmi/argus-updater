@@ -13,6 +13,19 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- **A probe's sidecar tells Argus why an update didn't take.** When it refuses an image (the pull
+  failed, the digest or the signature didn't check) or rolls one back (the new version didn't start
+  healthy), the reason goes out with its next check-in, a few seconds later, as `update_result`:
+  for the probe's update and for the sidecar's own. Argus (core releases after 0.9.24) shows it on the Updates
+  page and in the notice; until now it was only in the sidecar's log, and Argus could say no more
+  than "still on the old version" twenty minutes later. An older core ignores the field.
+
+### Changed
+- The short-lived helper that swaps a probe's sidecar (`<sidecar name>-selfupdate`) is no longer
+  removed the moment it ends: it stays until the sidecar's next round, a few seconds to a few
+  minutes, which reads how it went and removes it.
+
 ## [0.2.26] - 2026-11-17
 
 ### Fixed

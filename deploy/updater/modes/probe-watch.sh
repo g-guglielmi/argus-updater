@@ -44,6 +44,9 @@ PROBE_DIR="${ARGUS_PROBE_DIR:-/probe}"
 # The host's LAN address for the Probes page (lib/hostaddr.sh): read when we start and after each
 # start of the proxy, and carried by every check-in.
 . "$LIBDIR/lib/hostaddr.sh"
+# Why the last update didn't take (lib/result.sh): Argus shows it on the Updates page, where until
+# now a refusal read only as "still on the old version" twenty minutes later.
+. "$LIBDIR/lib/result.sh"
 
 log()      { echo "argus-updater[watch]: $*"; }
 progress() { echo "argus-updater[watch]: $*"; }
@@ -61,11 +64,43 @@ resolve_proxy() {
     | sed 's#^/##' | head -n1
 }
 
+# collect_selfupdate - what became of our own update. The helper that swaps us (probe-recreate, see
+# below) stays behind when it ends, so that whoever runs next, the new sidecar or we again after a
+# rollback, can read how it went: a helper that failed gives its last line as the reason, and either
+# way it is removed. Sets HELPER_RUNNING=1 while it still works (it watches the new sidecar a while).
+HELPER_SEEN=""
+collect_selfupdate() {
+  HELPER_RUNNING=0
+  _cs=$(api GET "/containers/$(self_container_id)/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
+  [ -n "$_cs" ] || return 0
+  _ch="${_cs}-selfupdate"
+  _cj=$(api GET "/containers/$_ch/json" 2>/dev/null || true)
+  _cid=$(printf '%s' "$_cj" | jq -r '.Id // empty' 2>/dev/null || true)
+  [ -n "$_cid" ] || return 0
+  case "$(printf '%s' "$_cj" | jq -r '.State.Status // empty' 2>/dev/null)" in
+    exited|dead) ;;
+    *) HELPER_RUNNING=1; return 0 ;;
+  esac
+  _cec=$(printf '%s' "$_cj" | jq -r '.State.ExitCode // 0' 2>/dev/null || echo 0)
+  if [ "$_cec" != "0" ] && [ "$_cid" != "$HELPER_SEEN" ]; then
+    _ctag=$(printf '%s' "$_cj" | jq -r '[.Config.Env[]? | select(startswith("ARGUS_RECREATE_TAG=")) | sub("^ARGUS_RECREATE_TAG="; "")] | .[0] // "latest"' 2>/dev/null || echo latest)
+    _cwhy=$(api GET "/containers/$_ch/logs?stdout=1&stderr=1&tail=80" 2>/dev/null | log_last_line false | sed 's/^argus-updater[^:]*: //' || true)
+    [ -n "$_cwhy" ] || _cwhy="the helper that swaps the sidecar ended with exit code $_cec"
+    log "our own update to $_ctag didn't take: $_cwhy"
+    result_set updater "$_ctag" "$_cwhy" again
+  fi
+  HELPER_SEEN="$_cid"
+  api DELETE "/containers/$_ch?force=true" >/dev/null 2>&1 || true
+}
+
 log "starting (poll ${INTERVAL}s, proxy=${PROXY_CONTAINER:-<by image $PROBE_IMAGE>})"
 WAIT="$INTERVAL"
 MISSED=0   # check-ins in a row that got no answer from Argus
 while true; do
   heartbeat $((INTERVAL * 2 + 1800))   # a round may include a proxy recreate
+  SOON=0   # an update just failed, or our own is still being watched: the next round comes soon
+  collect_selfupdate
+  [ "$HELPER_RUNNING" = "1" ] && SOON=1
   # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
   # mounted read-only here, but its contents came from the network and from another container.
   PROBE_TOKEN=$(read_kv "$META" PROBE_TOKEN)
@@ -83,7 +118,7 @@ while true; do
     # Advertise capability + report OUR (updater) version + read the target/one-shots. We report no
     # proxy version (the proxy reports its own); updater_version is our sidecar's own version.
     RESP=$(curl -sS -m 15 -H "Authorization: Bearer $PROBE_TOKEN" -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" --argjson hl "$(ha_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht, host_lan:$hl}')" \
+      -d "$(jq -nc --arg uv "$UPDATER_VERSION" --argjson ht "$(ht_report)" --argjson hl "$(ha_report)" --argjson ur "$(result_report)" '{selfupdate:true, updater_version:$uv, restarts:true, host_tools:$ht, host_lan:$hl, update_result:$ur}')" \
       "$CHECKIN_URL" 2>/dev/null || echo '')
     # Argus asks for the next round sooner while its Updates page is open or an update waits for us.
     # No answer at all (Argus restarting, the network gone): try again soon, backing off to the round.
@@ -114,13 +149,14 @@ while true; do
       if [ -n "$_t" ] && ! valid_tag "$_t"; then log "ignoring an invalid $_v tag from Argus"; eval "$_v=''"; fi
     done
 
-    # Self-update: recreate OURSELVES via an ephemeral --rm copy running probe-recreate against our
+    # Self-update: recreate OURSELVES via a short-lived copy running probe-recreate against our
     # own container (we can't rm -f ourselves). The ephemeral helper uses the NEW updater image so it
     # carries the latest recreate logic; it clones our config (mode, mounts, socket) onto the new tag.
     if [ -n "$UPDATER_UPDATE" ]; then
       SELF=$(self_container_id)
-      # Name the helper (so `docker logs <name>` reaches it while it runs) but --rm it (auto-removed on
-      # exit - no lingering container). --pull always so it runs the freshest image, never stale code.
+      # Name the helper (so `docker logs <name>` reaches it) and leave it behind when it ends: the
+      # next round, ours after a rollback or the new sidecar's, reads how it went and removes it
+      # (collect_selfupdate). It runs exactly the image pulled and verified here.
       _sn=$(api GET "/containers/$SELF/json" 2>/dev/null | jq -r '.Name // empty' 2>/dev/null | sed 's#^/##')
       [ -z "$_sn" ] && _sn="argus-updater"
       HELPER="${_sn}-selfupdate"
@@ -128,16 +164,19 @@ while true; do
       docker rm -f "$HELPER" >/dev/null 2>&1 || true
       # The helper IS the new updater: pull and verify it here, then run exactly what was pulled.
       if pull_verified "$UPDATER_REPO:$UPDATER_UPDATE" "$UPDATER_UPDATE_DIGEST"; then
-        docker run -d --rm --name "$HELPER" \
+        docker run -d --name "$HELPER" \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -e ARGUS_UPDATER_MODE=probe-recreate \
           -e ARGUS_RECREATE_TARGET="$SELF" \
-          -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" \
+          -e ARGUS_RECREATE_TAG="$UPDATER_UPDATE" -e ARGUS_RECREATE_NOUN=sidecar \
           -e ARGUS_RECREATE_DIGEST="$UPDATER_UPDATE_DIGEST" \
           "$UPDATER_REPO:$UPDATER_UPDATE" >/dev/null 2>&1 \
-          || log "could not spawn $HELPER (check: docker logs $HELPER)"
+          || { log "could not spawn $HELPER (check: docker logs $HELPER)"
+               result_set updater "$UPDATER_UPDATE" "the sidecar could not start the helper that swaps it; nothing changed" again; SOON=1; }
       else
         log "updater self-update refused: $PULL_ERR"
+        result_set updater "$UPDATER_UPDATE" "$PULL_ERR - the sidecar was left untouched" again
+        SOON=1
       fi
     fi
 
@@ -164,8 +203,13 @@ while true; do
         if recreate_container "$NAME" "$REPO:$DESIRED" "$EXPECT"; then
           log "$NAME updated to $REPO:$DESIRED"
           RECREATED=1
+          result_clear probe
         else
           log "update failed: $RECREATE_ERR" >&2
+          # An Update click is told each time it fails; the fleet target, retried every round, once
+          # per reason.
+          if [ "$FORCE" = "1" ]; then result_set probe "$DESIRED" "$RECREATE_ERR" again; else result_set probe "$DESIRED" "$RECREATE_ERR"; fi
+          SOON=1
         fi
       fi
       # A recreated proxy has just started, and so already runs the counts Argus wants.
@@ -188,5 +232,6 @@ while true; do
   # show them "updating" for a whole interval after they went in.
   sync_host_tools
   if [ "$HT_RAN" = "1" ]; then continue; fi
+  if [ "$SOON" = "1" ] && [ "$WAIT" -gt 15 ]; then WAIT=15; fi
   sleep "$WAIT"
 done

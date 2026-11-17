@@ -5,7 +5,7 @@
 # argus-updater - mode: probe-recreate (one-shot; the self-update primitive).
 #
 # A long-running container can't cleanly `docker rm -f` itself mid-update, so it spawns THIS
-# short-lived sister (Docker socket mounted, run with --rm) to recreate a target container on a new
+# short-lived sister (Docker socket mounted) to recreate a target container on a new
 # image, then exit. It uses the shared recreate engine - the SAME config-clone + verify + rollback
 # every mode uses - so the paths can never drift. Its main use now is the updater updating ITSELF
 # (probe-watch spawns it against its own container).

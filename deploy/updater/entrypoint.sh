@@ -13,7 +13,7 @@
 #   probe-watch     long-running socket-holding sidecar; poll Argus and recreate the PROXY via the
 #                   Engine API - the proxy stays socket-free. The one probe updater (run/compose/VM).
 #   probe-recreate  one-shot; recreate a target container on a new image, then exit. The self-update
-#                   primitive a long-running updater uses to recreate ITSELF (a --rm sister).
+#                   primitive a long-running updater uses to recreate ITSELF (a short-lived sister).
 set -eu
 
 MODE="${ARGUS_UPDATER_MODE:-core}"

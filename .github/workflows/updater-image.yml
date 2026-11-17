@@ -58,6 +58,8 @@ jobs:
         run: bash deploy/updater/test/hostaddr_test.sh
       - name: job status file test
         run: bash deploy/updater/test/job_test.sh
+      - name: update result record test
+        run: bash deploy/updater/test/result_test.sh
       - name: image signature verification test
         run: bash deploy/updater/test/verify_test.sh
       - name: health check and crash-loop rollback test

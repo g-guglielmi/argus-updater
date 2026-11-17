@@ -68,7 +68,7 @@ mode keeps working unchanged). The recreate engine is shared, so the paths can n
 |------|----------|--------------|
 | `core` *(default)* | long-running | Watch the shared `/update` dir; recreate the **core** when an admin clicks its **Update** on the Argus Updates page. `/healthz`-aware; preserves the release channel (`:latest`/`:testing`). Also keeps the core host's **collectors** current (below). |
 | `probe-watch` | long-running | **The probe updater** (run / compose / VM). A socket-holding sidecar that recreates the proxy via the Engine API on an **Update** from the Argus Updates page or a target change - so the **proxy stays socket-free**, same as the core. Restarts the proxy when Argus changes its Zabbix process counts (read only at start). Also updates **itself** on request via the primitive below. |
-| `probe-recreate` | one-shot | Recreate a target container on a new image, then exit. The self-update **primitive**: a long-running updater spawns an ephemeral `--rm` copy of itself in this mode to recreate itself. |
+| `probe-recreate` | one-shot | Recreate a target container on a new image, then exit. The self-update **primitive**: a long-running updater spawns a short-lived copy of itself in this mode to recreate itself. |
 
 Every mode recreates via the **Docker Engine API** (no `docker compose` dependency). The `core` mode
 is triggered from the core's **Settings → update** flow; `probe-watch` is driven by Argus fleet
@@ -117,6 +117,14 @@ host's network (`<sidecar name>-addr`, read-only, no capabilities, as nobody, re
 and reads the source address and gateway of the host's route to the internet. It does so when the
 sidecar starts and after each start of the proxy (an update, a restart), not on a timer, and an
 hour after a failed try; every check-in carries the result (`host_lan`).
+
+**Why an update didn't take** (probe-watch, `lib/result.sh`). When the sidecar refuses an image (the
+pull failed, the digest or the signature didn't check) or rolls one back (the new version didn't
+start healthy), it keeps the reason as one line and sends it with its check-ins (`update_result`:
+what, tag, when, why), the first a few seconds after the failure. Argus shows it on the Updates
+page and in its notice. This covers the proxy's update and the sidecar's own: the helper that swaps
+the sidecar (`<sidecar name>-selfupdate`) stays behind when it ends, the sidecar's next round reads
+its last line when it failed, and removes it.
 
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
