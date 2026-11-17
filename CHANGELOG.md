@@ -13,6 +13,19 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Fixed
+- **A swap the Docker Engine refuses says Docker's reason.** When Docker refused to rename the old
+  container, create the new one or start it, the updater rolled back but reported only the step
+  ("could not create the new sidecar container"), and a refused rename wasn't noticed at all, so the
+  reason named the step after it. Each of the three now carries what Docker said, for example
+  "the new proxy failed to start (... port is already allocated) - rolled back". A refused start is
+  also seen at once instead of after the health check's wait.
+- **A leftover `<name>_old` container is named, and nothing is stopped for it.** The swap parks the
+  running container under that name; one already there (left by an update that was cut short, or
+  made by hand) made every update fail half way and roll back. The updater now looks first and
+  says "a container named ..._old already exists ...: remove it, then update again", leaving the
+  running container untouched. It does not remove that container itself.
+
 ## [0.2.27] - 2026-11-17
 
 ### Added

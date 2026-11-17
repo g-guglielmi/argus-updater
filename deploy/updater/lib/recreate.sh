@@ -52,6 +52,16 @@ api() {
   fi
 }
 
+# api_said ANSWER - what the Engine API said went wrong, as one line of at most 180 characters ("" when
+# nothing did). curl gives no exit code for a call the Engine refuses, so a refusal shows only in the
+# answer: {"message": "..."} where a call that works answers with nothing (rename, start) or with its
+# result (create). Anything else that isn't JSON (curl's own error, the socket gone) is told as it is.
+api_said() {
+  [ -n "$1" ] || return 0
+  _as=$(printf '%s' "$1" | jq -r 'if type == "object" then (.message // empty) else empty end' 2>/dev/null) || _as="$1"
+  printf '%s' "$_as" | tr '[:cntrl:]' ' ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-180
+}
+
 # self_container_id - THIS container's own id, resolved robustly. /etc/hostname is NOT reliable (it
 # can be a custom hostname, or inherited from another container when a network namespace is shared).
 # Docker bind-mounts this container's config files (hostname/hosts/resolv.conf) from
@@ -365,6 +375,16 @@ recreate_container() {
   fi
   log "$NAME  $CUR_IMAGE -> $NEW_IMAGE"
 
+  # The swap parks the running container as <name>_old. A container already holding that name (left
+  # by an update that was cut short, or made by hand) would stop the swap half way, so it is seen
+  # here, before anything is stopped. It is not ours to remove: it may be the only copy of a
+  # container someone still wants.
+  if api GET "/containers/${NAME}_old/json" 2>/dev/null | jq -e '.Id' >/dev/null 2>&1; then
+    RECREATE_ERR="a container named ${NAME}_old already exists (left by an earlier update, or made by hand): remove it, then update again - the $RECREATE_NOUN was left untouched"
+    log "$RECREATE_ERR"
+    return 1
+  fi
+
   # Pull with a few retries, then verify the digest when one was handed out: a transient registry
   # blip must not silently no-op the update, and a swapped image must not run (the pull happens
   # BEFORE we touch the container, so a failure here leaves it running untouched).
@@ -387,16 +407,20 @@ recreate_container() {
 
   progress "recreating $NAME on $NEW_IMAGE"
   api POST "/containers/$NAME/stop?t=15" >/dev/null 2>&1 || true
-  if ! api POST "/containers/$NAME/rename?name=${NAME}_old" >/dev/null 2>&1; then
+  # Rename and start answer with nothing when they work: any answer is the reason they didn't.
+  _said=$(api_said "$(api POST "/containers/$NAME/rename?name=${NAME}_old" 2>&1 || true)")
+  if [ -n "$_said" ]; then
     api POST "/containers/$NAME/start" >/dev/null 2>&1 || true
-    RECREATE_ERR="could not rename the old $RECREATE_NOUN - aborted, $RECREATE_NOUN left running"
+    RECREATE_ERR="could not rename the old $RECREATE_NOUN ($_said) - aborted, $RECREATE_NOUN left running"
     return 1
   fi
 
-  NEWID=$(api POST "/containers/create?name=$NAME" "$CREATE_BODY" | jq -r '.Id // empty')
+  _made=$(api POST "/containers/create?name=$NAME" "$CREATE_BODY" 2>&1 || true)
+  NEWID=$(printf '%s' "$_made" | jq -r '.Id // empty' 2>/dev/null || true)
   if [ -z "$NEWID" ]; then
+    _said=$(api_said "$_made")
     rollback
-    RECREATE_ERR="could not create the new $RECREATE_NOUN container - rolled back"
+    RECREATE_ERR="could not create the new $RECREATE_NOUN container${_said:+ ($_said)} - rolled back"
     return 1
   fi
 
@@ -416,10 +440,11 @@ recreate_container() {
     fi
   done
 
-  if ! api POST "/containers/$NEWID/start" >/dev/null 2>&1; then
+  _said=$(api_said "$(api POST "/containers/$NEWID/start" 2>&1 || true)")
+  if [ -n "$_said" ]; then
     api DELETE "/containers/$NEWID?force=true" >/dev/null 2>&1 || true
     rollback
-    RECREATE_ERR="the new $RECREATE_NOUN failed to start - rolled back"
+    RECREATE_ERR="the new $RECREATE_NOUN failed to start ($_said) - rolled back"
     return 1
   fi
 
