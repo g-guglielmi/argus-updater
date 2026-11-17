@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.29] - 2026-11-17
+
 ### Fixed
 - **Docker's reason keeps its telling part.** Found by the new test below, on its first run against
   a real Engine: Docker wraps what the runtime said in a chain of "... failed:" and the cause comes
