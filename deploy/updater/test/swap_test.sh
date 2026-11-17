@@ -68,8 +68,17 @@ check "a result is no refusal"  "$(api_said '{"Id":"abc","Warnings":[]}')" ""
 check "curl's own error as is"  "$(api_said 'curl: (7) Failed to connect to the socket')" "curl: (7) Failed to connect to the socket"
 check "one line"                "$(api_said "$(printf '{"message":"first line\\nsecond\\tline"}')")" "first line second line"
 LONG=$(printf 'x%.0s' $(seq 1 400))
-CUT=$(api_said "{\"message\":\"$LONG\"}")
-check "cut at 180 characters"   "${#CUT}" 180
+CUT=$(api_said "{\"message\":\"${LONG}the cause comes last\"}")
+check "at most 230 characters"  "${#CUT}" 230
+has   "its start stays"         "$CUT" "xxxx ... xxxx"
+has   "and so does its end"     "$CUT" "xxxxthe cause comes last"
+HEX=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+check "a container id is cut to 12" "$(api_said "{\"message\":\"Conflict. The container name \\\"/x_old\\\" is already in use by container \\\"$HEX\\\".\"}")" \
+  'Conflict. The container name "/x_old" is already in use by container "0123456789ab".'
+check "the runtime's wrapping goes" "$(api_said '{"message":"failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: \"/no-such-program\": stat /no-such-program: no such file or directory: unknown"}')" \
+  'exec: "/no-such-program": stat /no-such-program: no such file or directory'
+check "a short refusal is left alone" "$(api_said '{"message":"driver failed programming external connectivity: port is already allocated"}')" \
+  "driver failed programming external connectivity: port is already allocated"
 
 echo "image_name: the image at no version"
 check "a tag goes"            "$(image_name example.com/x/argus-updater:0.2.27)" "example.com/x/argus-updater"

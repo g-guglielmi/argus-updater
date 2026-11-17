@@ -13,6 +13,16 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Fixed
+- **Docker's reason keeps its telling part.** Found by the new test below, on its first run against
+  a real Engine: Docker wraps what the runtime said in a chain of "... failed:" and the cause comes
+  last, so the cut at 180 characters dropped it. A new image whose program isn't there read
+  "the new container failed to start (failed to create task for container: ... error during
+  container init: exec) - rolled back". The wrapping now goes, a container id is cut to the 12
+  characters `docker ps` shows, and a reason that is still too long keeps both its ends. The same
+  failure now reads "... failed to start (exec: "/the-program": stat /the-program: no such file or
+  directory) - rolled back".
+
 ### Changed
 - **The swap is tested against a real Docker Engine on every pull request.** The unit test fakes the
   Engine API, so it could not show what Docker really answers. `test/swap_live_test.sh` runs the

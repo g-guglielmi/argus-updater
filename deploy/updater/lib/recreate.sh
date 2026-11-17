@@ -52,14 +52,21 @@ api() {
   fi
 }
 
-# api_said ANSWER - what the Engine API said went wrong, as one line of at most 180 characters ("" when
+# api_said ANSWER - what the Engine API said went wrong, as one line of at most 230 characters ("" when
 # nothing did). curl gives no exit code for a call the Engine refuses, so a refusal shows only in the
 # answer: {"message": "..."} where a call that works answers with nothing (rename, start) or with its
 # result (create). Anything else that isn't JSON (curl's own error, the socket gone) is told as it is.
+# Docker wraps what the runtime said in a chain of "X failed: " and names containers by their 64
+# characters, which pushed the cause itself past any cut (seen against a real Engine: a program that
+# isn't in the image read "... error during container init: exec" and stopped there). So the chain
+# goes, an id is cut to the 12 characters docker ps shows, and what is still too long keeps its two
+# ends, since Docker says the cause last.
 api_said() {
   [ -n "$1" ] || return 0
   _as=$(printf '%s' "$1" | jq -r 'if type == "object" then (.message // empty) else empty end' 2>/dev/null) || _as="$1"
-  printf '%s' "$_as" | tr '[:cntrl:]' ' ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-180
+  printf '%s' "$_as" | tr '[:cntrl:]' ' ' \
+    | sed -E 's/  */ /g; s/^ //; s/ $//; s/([0-9a-f]{12})[0-9a-f]{52}/\1/g; s/^(failed to create task for container: |failed to create shim task: |OCI runtime create failed: |runc create failed: |unable to start container process: |error during container init: )+//; s/: unknown$//' \
+    | awk '{ if (length($0) > 230) print substr($0, 1, 60) " ... " substr($0, length($0) - 164); else print }'
 }
 
 # self_container_id - THIS container's own id, resolved robustly. /etc/hostname is NOT reliable (it
