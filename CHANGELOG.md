@@ -13,6 +13,20 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Fixed
+- **A probe on arm64 (a Raspberry Pi, a NanoPi) can update again.** The arm64 image carried the
+  x86 build of `cosign`, the tool that checks an image's signature, so a sidecar there could not
+  check any image and refused every update, its own and its probe's: the Updates page showed
+  "update failed" and the sidecar's log "can't execute 'cosign': Exec format error". Every arm64
+  image from 0.2.21 to 0.2.25 has it; x86 was never affected. The build now takes the binary for
+  the image it is building and checks the file itself.
+- A sidecar already running one of those versions on arm64 cannot fetch this fix by itself, since
+  it refuses every image. Replace it once on the box, with its own container name:
+  `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e ARGUS_UPDATER_MODE=probe-recreate
+  -e ARGUS_RECREATE_TARGET=<sidecar container name> -e ARGUS_RECREATE_TAG=latest
+  ghcr.io/g-guglielmi/argus-updater:latest`. It keeps the sidecar's settings; updates work from
+  the Updates page again afterwards.
+
 ## [0.2.25] - 2026-11-16
 
 ### Security
