@@ -124,7 +124,11 @@ start healthy), it keeps the reason as one line and sends it with its check-ins 
 what, tag, when, why), the first a few seconds after the failure. Argus shows it on the Updates
 page and in its notice. This covers the proxy's update and the sidecar's own: the helper that swaps
 the sidecar (`<sidecar name>-selfupdate`) stays behind when it ends, the sidecar's next round reads
-its last line when it failed, and removes it.
+its last line when it failed, and removes it. When the Docker Engine itself refuses a step of the swap
+(the rename, the create, the start), the reason carries what Docker said. The swap parks the running
+container as `<name>_old` until the new one is healthy: one left there by an update that was cut short
+(not running, the same image at whatever version) is removed before the next swap; one that runs or
+is another image is not touched, and the update is refused with that as the reason.
 
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 

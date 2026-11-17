@@ -75,6 +75,9 @@ self_container_id() {
 
 # image_repo IMAGE - strip the tag, keep the repo (ghcr.io/x/y:tag -> ghcr.io/x/y).
 image_repo() { printf '%s' "$1" | sed 's/:[^:/]*$//'; }
+# image_name IMAGE - the image at no version: no tag and no @digest, to tell whether two containers
+# are the same image (ghcr.io/x/y:tag@sha256:... -> ghcr.io/x/y).
+image_name() { image_repo "$(printf '%s' "$1" | sed 's/@.*$//')"; }
 # image_tag IMAGE - the tag (ghcr.io/x/y:tag -> tag; empty if none).
 image_tag()  { printf '%s' "$1" | sed -n 's#.*:\([^:/]*\)$#\1#p'; }
 
@@ -375,14 +378,38 @@ recreate_container() {
   fi
   log "$NAME  $CUR_IMAGE -> $NEW_IMAGE"
 
-  # The swap parks the running container as <name>_old. A container already holding that name (left
-  # by an update that was cut short, or made by hand) would stop the swap half way, so it is seen
-  # here, before anything is stopped. It is not ours to remove: it may be the only copy of a
-  # container someone still wants.
-  if api GET "/containers/${NAME}_old/json" 2>/dev/null | jq -e '.Id' >/dev/null 2>&1; then
-    RECREATE_ERR="a container named ${NAME}_old already exists (left by an earlier update, or made by hand): remove it, then update again - the $RECREATE_NOUN was left untouched"
-    log "$RECREATE_ERR"
-    return 1
+  # The swap parks the running container as <name>_old. A container already holding that name would
+  # stop the swap half way, so it is dealt with here, before anything is stopped. What an update that
+  # was cut short leaves behind (not running, and the same image as the container being updated, at
+  # whatever version) is removed, so the next update heals the box by itself. Anything else (it runs,
+  # or it is another image) is not ours to remove: the update is refused and says why.
+  _old=$(api GET "/containers/${NAME}_old/json" 2>/dev/null || true)
+  _oldid=$(printf '%s' "$_old" | jq -r 'if type == "object" then (.Id // empty) else empty end' 2>/dev/null || true)
+  if [ -n "$_oldid" ]; then
+    _oldimg=$(printf '%s' "$_old" | jq -r '.Config.Image // empty' 2>/dev/null || true)
+    _oldstate=$(printf '%s' "$_old" | jq -r '.State.Status // empty' 2>/dev/null || true)
+    _why=""
+    case "$_oldstate" in
+      created|exited|dead) ;;
+      *) _why="it is ${_oldstate:-in an unknown state}" ;;
+    esac
+    _oldname=$(image_name "$_oldimg")
+    if [ -z "$_why" ] && { [ -z "$_oldname" ] || [ "$_oldname" != "$(image_name "$CUR_IMAGE")" ]; }; then
+      _why="it is from another image, ${_oldimg:-unknown}"
+    fi
+    if [ -n "$_why" ]; then
+      RECREATE_ERR="a container named ${NAME}_old already exists and is not what an update leaves behind ($_why): remove or rename it, then update again - the $RECREATE_NOUN was left untouched"
+      log "$RECREATE_ERR"
+      return 1
+    fi
+    # By id and without force: should it have started in the meantime, Docker refuses and we say so.
+    _said=$(api_said "$(api DELETE "/containers/$_oldid" 2>&1 || true)")
+    if [ -n "$_said" ]; then
+      RECREATE_ERR="could not remove ${NAME}_old, left by an earlier update ($_said): remove it, then update again - the $RECREATE_NOUN was left untouched"
+      log "$RECREATE_ERR"
+      return 1
+    fi
+    log "removed ${NAME}_old, left by an earlier update ($_oldimg, $_oldstate)"
   fi
 
   # Pull with a few retries, then verify the digest when one was handed out: a transient registry

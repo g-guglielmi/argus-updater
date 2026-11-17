@@ -20,11 +20,15 @@ without a Release; collect those changes under **Unreleased** until the next tag
   reason named the step after it. Each of the three now carries what Docker said, for example
   "the new proxy failed to start (... port is already allocated) - rolled back". A refused start is
   also seen at once instead of after the health check's wait.
-- **A leftover `<name>_old` container is named, and nothing is stopped for it.** The swap parks the
-  running container under that name; one already there (left by an update that was cut short, or
-  made by hand) made every update fail half way and roll back. The updater now looks first and
-  says "a container named ..._old already exists ...: remove it, then update again", leaving the
-  running container untouched. It does not remove that container itself.
+- **A leftover `<name>_old` container no longer blocks updates.** The swap parks the running
+  container under that name; one already there (left by an update that was cut short, or made by
+  hand) made every update fail half way and roll back. The updater now looks before it stops
+  anything. What an update leaves behind (a container that isn't running and is the same image, at
+  whatever version) is removed and the update goes on, with a line in the log, so nobody has to
+  clean up on the box. One that runs, or is another image, isn't the updater's to remove: the update
+  is refused with the reason ("a container named ..._old already exists and is not what an update
+  leaves behind (it is running): remove or rename it, then update again") and the running container
+  is left untouched.
 
 ## [0.2.27] - 2026-11-17
 

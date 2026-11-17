@@ -21,6 +21,9 @@ check() { # desc got want
 has() { # desc text part
   case "$2" in *"$3"*) echo "  ok   $1" ;; *) echo "  FAIL $1: <$2> lacks <$3>"; fail=1 ;; esac
 }
+before() { # desc text first then
+  case "$2" in *"$3"*"$4"*) echo "  ok   $1" ;; *) echo "  FAIL $1: <$3> is not before <$4> in <$2>"; fail=1 ;; esac
+}
 lacks() { # desc text part
   case "$2" in *"$3"*) echo "  FAIL $1: <$2> has <$3>"; fail=1 ;; *) echo "  ok   $1" ;; esac
 }
@@ -45,6 +48,7 @@ api() {
     "POST /containers/site1-updater/rename?name=site1-updater_old") printf '%s' "$RENAME_OUT" ;;
     "POST /containers/create?name=site1-updater") printf '%s' "$CREATE_OUT" ;;
     "POST /containers/newid/start")           printf '%s' "$START_OUT" ;;
+    "DELETE /containers/strayid")             printf '%s' "$UNSTRAY_OUT" ;;
     *) : ;;   # stop, delete, the rollback's rename and start: nothing to say
   esac
 }
@@ -52,7 +56,7 @@ calls() { tr '\n' ';' < "$T/calls" 2>/dev/null; }
 reset() {
   rm -f "$T/calls"
   OLD_JSON='{"message":"No such container: site1-updater_old"}'
-  RENAME_OUT=""; CREATE_OUT='{"Id":"newid","Warnings":[]}'; START_OUT=""; VERIFY_RC=0
+  RENAME_OUT=""; CREATE_OUT='{"Id":"newid","Warnings":[]}'; START_OUT=""; UNSTRAY_OUT=""; VERIFY_RC=0
 }
 run() { recreate_container site1-updater example.com/argus-updater:latest; echo $? > "$T/rc"; }
 rc() { cat "$T/rc"; }
@@ -67,6 +71,12 @@ LONG=$(printf 'x%.0s' $(seq 1 400))
 CUT=$(api_said "{\"message\":\"$LONG\"}")
 check "cut at 180 characters"   "${#CUT}" 180
 
+echo "image_name: the image at no version"
+check "a tag goes"            "$(image_name example.com/x/argus-updater:0.2.27)" "example.com/x/argus-updater"
+check "a digest goes"         "$(image_name example.com/x/argus-updater@sha256:abc123)" "example.com/x/argus-updater"
+check "tag and digest go"     "$(image_name example.com/x/argus-updater:latest@sha256:abc123)" "example.com/x/argus-updater"
+check "a registry port stays" "$(image_name localhost:5000/argus-updater)" "localhost:5000/argus-updater"
+
 echo "a swap that works"
 reset; run
 check "succeeds" "$(rc)" 0
@@ -74,15 +84,50 @@ has   "the old one is parked"  "$(calls)" "POST /containers/site1-updater/rename
 has   "the new one starts"     "$(calls)" "POST /containers/newid/start"
 has   "the old one is dropped" "$(calls)" "DELETE /containers/site1-updater_old?force=true"
 
-echo "a container already named <name>_old: refused before anything is stopped"
-reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old"}'; run
+echo "a <name>_old left by an update that was cut short: removed, and the update goes on"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/argus-updater:0.2.26"},"State":{"Status":"exited"}}'; run
+check  "succeeds" "$(rc)" 0
+before "removed before anything is stopped" "$(calls)" "DELETE /containers/strayid;" "POST /containers/site1-updater/stop"
+has    "the old one is parked" "$(calls)" "POST /containers/site1-updater/rename?name=site1-updater_old"
+has    "the new one starts"    "$(calls)" "POST /containers/newid/start"
+
+echo "a <name>_old made from the same image and never started: removed too"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/argus-updater:latest"},"State":{"Status":"created"}}'; run
+check  "succeeds" "$(rc)" 0
+before "removed before anything is stopped" "$(calls)" "DELETE /containers/strayid;" "POST /containers/site1-updater/stop"
+
+echo "a <name>_old that runs: not ours, refused before anything is stopped"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/argus-updater:0.2.26"},"State":{"Status":"running"}}'; run
 check "fails" "$(rc)" 1
 has   "says which container" "$RECREATE_ERR" "a container named site1-updater_old already exists"
-has   "says what to do"      "$RECREATE_ERR" "remove it, then update again"
+has   "says why it stays"    "$RECREATE_ERR" "(it is running)"
+has   "says what to do"      "$RECREATE_ERR" "remove or rename it, then update again"
 has   "says nothing changed" "$RECREATE_ERR" "the sidecar was left untouched"
 lacks "the sidecar is not stopped" "$(calls)" "/stop"
 lacks "nothing is renamed"         "$(calls)" "/rename"
 lacks "the stray one is not removed" "$(calls)" "DELETE"
+
+echo "a <name>_old from another image: not ours, refused"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/something-else:1.0"},"State":{"Status":"exited"}}'; run
+check "fails" "$(rc)" 1
+has   "says why it stays" "$RECREATE_ERR" "(it is from another image, example.com/something-else:1.0)"
+lacks "the sidecar is not stopped" "$(calls)" "/stop"
+lacks "the stray one is not removed" "$(calls)" "DELETE"
+
+echo "a <name>_old with no image or state told: not ours, refused"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old"}'; run
+check "fails" "$(rc)" 1
+lacks "the sidecar is not stopped" "$(calls)" "/stop"
+lacks "the stray one is not removed" "$(calls)" "DELETE"
+
+echo "the Engine refuses to remove the leftover"
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/argus-updater:0.2.26"},"State":{"Status":"exited"}}'
+UNSTRAY_OUT='{"message":"removal of container strayid is already in progress"}'; run
+check "fails" "$(rc)" 1
+has   "names the step"         "$RECREATE_ERR" "could not remove site1-updater_old, left by an earlier update"
+has   "carries Docker's words" "$RECREATE_ERR" "(removal of container strayid is already in progress)"
+has   "says nothing changed"   "$RECREATE_ERR" "the sidecar was left untouched"
+lacks "the sidecar is not stopped" "$(calls)" "/stop"
 
 echo "the Engine refuses the rename"
 reset; RENAME_OUT='{"message":"Conflict. The container name \"/site1-updater_old\" is already in use"}'; run
