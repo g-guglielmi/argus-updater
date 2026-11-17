@@ -13,6 +13,19 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Added
+- **A swap a power cut interrupted is put back.** The swap stops the running container, parks it,
+  then creates and starts the new one. A power cut (or the updater stopped) in the middle left
+  nothing running under that name, and Docker does not restart a container that was stopped on
+  purpose: a proxy stayed down until someone started it by hand on the box. The swap now leaves a
+  note before it stops anything and removes it when it ends. A sidecar that finds the note on its
+  next round puts the previous container back (its name, should it be parked; the half-made new
+  one goes) and starts it, then tells Argus: the update reads failed, with "the update to ... was
+  cut short (a power cut, or the updater was stopped half way): the previous proxy was put back and
+  runs again", and is tried again like any other. The core's updater does the same for the core.
+  Not covered: an updater's own update, whose helper is not started again after a cut; what it
+  watches over keeps running.
+
 ## [0.2.29] - 2026-11-17
 
 ### Fixed

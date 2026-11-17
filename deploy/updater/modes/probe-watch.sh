@@ -101,6 +101,17 @@ while true; do
   SOON=0   # an update just failed, or our own is still being watched: the next round comes soon
   collect_selfupdate
   [ "$HELPER_RUNNING" = "1" ] && SOON=1
+  # A swap of the proxy that never ended (a power cut in the middle, or we were stopped): put the
+  # proxy back and tell Argus. The update is tried again further down, like any other.
+  swap_heal
+  if [ "$HEALED" = "1" ]; then
+    if [ "$HEAL_BACK" = "1" ]; then
+      result_set probe "$(image_tag "$HEAL_TO")" "$HEAL_MSG" again
+    else
+      result_set probe "$(image_tag "$HEAL_TO")" "$HEAL_MSG"
+    fi
+    SOON=1
+  fi
   # proxy.env is read as data: a token and a URL, each checked for shape. The proxy's data volume is
   # mounted read-only here, but its contents came from the network and from another container.
   PROBE_TOKEN=$(read_kv "$META" PROBE_TOKEN)

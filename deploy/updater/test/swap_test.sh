@@ -33,6 +33,7 @@ trap 'rm -rf "$T"' EXIT
 log() { :; }
 progress() { :; }
 sleep() { :; }
+sync() { :; }
 # The pull, the config clone and the health check have their own tests.
 pull_verified() { return 0; }
 build_create_body() { echo '{}'; }
@@ -40,10 +41,15 @@ verify() { return "${VERIFY_RC:-0}"; }
 RECREATE_NOUN=sidecar
 
 # A fake Engine API: every call is noted in $T/calls, and each step answers what the case sets.
+SWAP_MARK="$T/swap"
 api() {
   echo "$1 $2" >> "$T/calls"
   case "$1 $2" in
-    "GET /containers/site1-updater/json")     echo '{"Id":"oldid","Name":"/site1-updater","Config":{"Image":"example.com/argus-updater:latest"},"NetworkSettings":{"Networks":{"bridge":{}}},"HostConfig":{"NetworkMode":"bridge"}}' ;;
+    "GET /_ping")                             printf '%s' "$PING" ;;
+    "GET /containers/site1-updater/json")     printf '%s' "$CUR_JSON" ;;
+    "POST /containers/site1-updater/stop?t=15") if [ -f "$SWAP_MARK" ]; then cp "$SWAP_MARK" "$T/note_at_stop"; fi ;;
+    "POST /containers/abc123/rename?name=site1-updater") printf '%s' "$BACK_OUT" ;;
+    "POST /containers/abc123/start")          printf '%s' "$RESTART_OUT" ;;
     "GET /containers/site1-updater_old/json") printf '%s' "$OLD_JSON" ;;
     "POST /containers/site1-updater/rename?name=site1-updater_old") printf '%s' "$RENAME_OUT" ;;
     "POST /containers/create?name=site1-updater") printf '%s' "$CREATE_OUT" ;;
@@ -54,7 +60,9 @@ api() {
 }
 calls() { tr '\n' ';' < "$T/calls" 2>/dev/null; }
 reset() {
-  rm -f "$T/calls"
+  rm -f "$T/calls" "$T/note_at_stop" "$SWAP_MARK"
+  PING=OK; BACK_OUT=""; RESTART_OUT=""
+  CUR_JSON='{"Id":"abc123","Name":"/site1-updater","Config":{"Image":"example.com/argus-updater:latest"},"NetworkSettings":{"Networks":{"bridge":{}}},"HostConfig":{"NetworkMode":"bridge"}}'
   OLD_JSON='{"message":"No such container: site1-updater_old"}'
   RENAME_OUT=""; CREATE_OUT='{"Id":"newid","Warnings":[]}'; START_OUT=""; UNSTRAY_OUT=""; VERIFY_RC=0
 }
@@ -174,6 +182,99 @@ reset; VERIFY_RC=1; run
 check "fails" "$(rc)" 1
 has   "says so"                 "$RECREATE_ERR" "failed its health check, rolled back"
 has   "the old name comes back" "$(calls)" "POST /containers/site1-updater_old/rename?name=site1-updater"
+
+note() { if [ -f "$SWAP_MARK" ]; then echo there; else echo gone; fi; }
+GONE='{"message":"No such container"}'
+
+echo "the note of a swap in hand: there before anything is stopped, gone when the swap ends"
+reset; run
+check "the note was there at the stop"  "$(jq -r '.name + " " + .id + " " + .to' "$T/note_at_stop" 2>/dev/null)" "site1-updater abc123 example.com/argus-updater:latest"
+check "gone after a swap that worked"   "$(note)" gone
+reset; RENAME_OUT='{"message":"no"}'; run
+check "gone after a refused rename"     "$(note)" gone
+reset; CREATE_OUT='{"message":"no"}'; run
+check "gone after a refused create"     "$(note)" gone
+reset; START_OUT='{"message":"no"}'; run
+check "gone after a refused start"      "$(note)" gone
+reset; VERIFY_RC=1; run
+check "gone after a failed health check" "$(note)" gone
+reset; OLD_JSON='{"Id":"strayid","Name":"/site1-updater_old","Config":{"Image":"example.com/argus-updater:0.2.26"},"State":{"Status":"running"}}'; run
+check "never written when nothing is stopped" "$(if [ -f "$T/note_at_stop" ]; then echo written; else echo no; fi)" no
+
+echo "no note: nothing to heal"
+reset; swap_heal
+check "nothing healed"    "$HEALED" 0
+check "Docker isn't asked" "$(calls)" ""
+
+echo "cut before the rename: the noted container is still under its name"
+reset; swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "healed"               "$HEALED $HEAL_BACK" "1 1"
+has   "it is started"        "$(calls)" "POST /containers/abc123/start"
+lacks "nothing is removed"   "$(calls)" "DELETE"
+lacks "nothing is renamed"   "$(calls)" "/rename"
+has   "says what happened"   "$HEAL_MSG" "the update to 0.2.30 was cut short"
+has   "and what was done"    "$HEAL_MSG" "the previous sidecar was put back and runs again"
+check "the note is gone"     "$(note)" gone
+
+echo "cut after the rename: the noted container is parked, nothing holds the name"
+reset; CUR_JSON="$GONE"; OLD_JSON='{"Id":"abc123","Name":"/site1-updater_old"}'
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check  "healed"                  "$HEALED $HEAL_BACK" "1 1"
+before "its name back, then started" "$(calls)" "POST /containers/abc123/rename?name=site1-updater;" "POST /containers/abc123/start"
+lacks  "nothing is removed"      "$(calls)" "DELETE"
+check  "the note is gone"        "$(note)" gone
+
+echo "cut after the create: the new one holds the name and was never checked"
+reset; CUR_JSON='{"Id":"def456","Name":"/site1-updater"}'; OLD_JSON='{"Id":"abc123","Name":"/site1-updater_old"}'
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check  "healed"                  "$HEALED $HEAL_BACK" "1 1"
+before "the new one goes first"  "$(calls)" "DELETE /containers/def456?force=true;" "POST /containers/abc123/rename?name=site1-updater"
+has    "the noted one is started" "$(calls)" "POST /containers/abc123/start"
+lacks  "the noted one is not removed" "$(calls)" "DELETE /containers/abc123"
+check  "the note is gone"        "$(note)" gone
+
+echo "the swap had ended, only the note stayed"
+reset; CUR_JSON='{"Id":"def456","Name":"/site1-updater"}'
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "nothing to tell"          "$HEALED" 0
+has   "the one there is made to run" "$(calls)" "POST /containers/site1-updater/start"
+lacks "nothing is removed"       "$(calls)" "DELETE"
+check "the note is gone"         "$(note)" gone
+
+echo "nothing left to put back"
+reset; CUR_JSON="$GONE"
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "told, not put back"       "$HEALED $HEAL_BACK" "1 0"
+has   "says so"                  "$HEAL_MSG" "nothing to put back"
+check "the note is gone"         "$(note)" gone
+
+echo "Docker isn't answering yet: wait for the next round"
+reset; PING=""
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "nothing healed"           "$HEALED" 0
+lacks "nothing is touched"       "$(calls)" "POST"
+check "the note stays"           "$(note)" there
+
+echo "Docker refuses to give the name back: said, and tried again next round"
+reset; CUR_JSON="$GONE"; OLD_JSON='{"Id":"abc123","Name":"/site1-updater_old"}'; BACK_OUT='{"message":"name is reserved"}'
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "told, not put back"       "$HEALED $HEAL_BACK" "1 0"
+has   "carries Docker's words"   "$HEAL_MSG" "could not get its name back (name is reserved)"
+check "the note stays"           "$(note)" there
+
+echo "Docker refuses the start: said, and tried again next round"
+reset; RESTART_OUT='{"message":"port is already allocated"}'
+swap_mark site1-updater abc123 example.com/argus-updater:0.2.30; swap_heal
+check "told, not put back"       "$HEALED $HEAL_BACK" "1 0"
+has   "carries Docker's words"   "$HEAL_MSG" "could not be started again (port is already allocated)"
+check "the note stays"           "$(note)" there
+
+echo "a note that can't be read"
+reset; echo 'not json' > "$SWAP_MARK"; swap_heal
+check "nothing healed"           "$HEALED" 0
+check "the note is gone"         "$(note)" gone
+reset; echo '{"name":"../etc","id":"abc123"}' > "$SWAP_MARK"; swap_heal
+check "a name that is no container name is not used" "$HEALED $(note)" "0 gone"
 
 if [ "$fail" = 0 ]; then echo "PASS"; else echo "FAILED"; fi
 exit $fail

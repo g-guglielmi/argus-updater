@@ -366,10 +366,109 @@ build_create_body() {
     + (if $net != null then {NetworkingConfig: $net} else {} end)'
 }
 
+# --- a swap that was cut short --------------------------------------------------------------------
+# The swap stops the running container, parks it as <name>_old, then creates and starts the new one.
+# A power cut (or the updater stopped) in the middle leaves nothing running under that name: the old
+# container stopped or parked, the new one missing or never started. Docker does not restart a
+# container that was stopped on purpose, so it stays down until someone starts it by hand.
+# So the swap leaves a note before it stops anything (swap_mark: the container's name and id and the
+# image it was going to, forced to the disk) and takes it away when it ends, whichever way
+# (swap_unmark). A note still there when a long-running mode goes round means a swap never ended:
+# swap_heal puts the container the note names back the way it was and starts it. Which container is
+# which is told by the id in the note, never guessed:
+#   - the container under the name is the noted one (the cut came before the rename): start it;
+#   - the noted one is parked as <name>_old: whatever holds the name is the new one, never checked
+#     for health, and goes; the noted one gets its name back and is started;
+#   - the noted one is gone (the swap had ended, only the note stayed): the container under the
+#     name is the new, checked one: make sure it runs.
+# The update itself is not finished here: the next round goes through the whole swap again, health
+# check included. Not covered: an updater's OWN update, whose helper is not started again after a
+# cut (the container it watches over keeps running; Argus shows the updater as not reporting).
+SWAP_MARK="${ARGUS_SWAP_MARK:-/tmp/argus-updater.swap}"
+
+# swap_mark NAME ID NEW_IMAGE - the note, written aside, renamed and forced to the disk. Best
+# effort: a swap is never held up because the note could not be written.
+swap_mark() {
+  jq -nc --arg n "$1" --arg i "$2" --arg t "$3" --argjson at "$(date +%s)" '{name: $n, id: $i, to: $t, at: $at}' > "$SWAP_MARK.new" 2>/dev/null \
+    && mv -f "$SWAP_MARK.new" "$SWAP_MARK" 2>/dev/null && sync 2>/dev/null || true
+}
+swap_unmark() { rm -f "$SWAP_MARK" "$SWAP_MARK.new" 2>/dev/null || true; }
+
+# swap_heal - put back what a cut-short swap left. Nothing to do without a note (HEALED=0). With
+# one: HEALED=1, HEAL_TO is the image the swap was going to, HEAL_MSG says what was done or what
+# could not be, and HEAL_BACK=1 when the container runs under its name again. A step Docker refuses
+# keeps the note, so the next round tries again; so does a Docker that isn't answering yet.
+swap_heal() {
+  HEALED=0; HEAL_BACK=0; HEAL_MSG=""; HEAL_TO=""
+  [ -f "$SWAP_MARK" ] || return 0
+  _hn=$(jq -r '.name // empty' "$SWAP_MARK" 2>/dev/null || true)
+  _hi=$(jq -r '.id // empty' "$SWAP_MARK" 2>/dev/null || true)
+  HEAL_TO=$(jq -r '.to // empty' "$SWAP_MARK" 2>/dev/null || true)
+  case "$_hn" in ''|*[!A-Za-z0-9_.-]*) _hn="" ;; esac
+  case "$_hi" in ''|*[!a-f0-9]*) _hi="" ;; esac
+  if [ -z "$_hn" ] || [ -z "$_hi" ]; then
+    log "the note of an unfinished update ($SWAP_MARK) can't be read - removed"
+    swap_unmark
+    return 0
+  fi
+  [ "$(api GET "/_ping" 2>/dev/null || true)" = "OK" ] || return 0
+  _hcur=$(api GET "/containers/$_hn/json" 2>/dev/null | jq -r 'if type == "object" then (.Id // empty) else empty end' 2>/dev/null || true)
+  _hold=$(api GET "/containers/${_hn}_old/json" 2>/dev/null | jq -r 'if type == "object" then (.Id // empty) else empty end' 2>/dev/null || true)
+  _hto=$(image_tag "$HEAL_TO"); [ -n "$_hto" ] || _hto="a new version"
+  _hcut="the update to $_hto was cut short (a power cut, or the updater was stopped half way)"
+
+  if [ "$_hcur" != "$_hi" ] && [ "$_hold" != "$_hi" ]; then
+    if [ -n "$_hcur" ]; then
+      # The swap had ended: what holds the name is the new, checked container.
+      api POST "/containers/$_hn/start" >/dev/null 2>&1 || true
+      log "an update of $_hn had ended, only its note stayed - removed"
+    else
+      HEALED=1
+      HEAL_MSG="$_hcut and neither the $RECREATE_NOUN '$_hn' nor its parked copy is there any more: nothing to put back"
+      log "$HEAL_MSG"
+    fi
+    swap_unmark
+    return 0
+  fi
+
+  HEALED=1
+  log "an update of $_hn was cut short - putting the previous $RECREATE_NOUN back"
+  if [ "$_hold" = "$_hi" ]; then
+    if [ -n "$_hcur" ]; then
+      api POST "/containers/$_hcur/stop?t=10" >/dev/null 2>&1 || true
+      api DELETE "/containers/$_hcur?force=true" >/dev/null 2>&1 || true
+    fi
+    _said=$(api_said "$(api POST "/containers/$_hold/rename?name=$_hn" 2>&1 || true)")
+    if [ -n "$_said" ]; then
+      HEAL_MSG="$_hcut and the previous $RECREATE_NOUN could not get its name back ($_said): it is parked as ${_hn}_old"
+      log "$HEAL_MSG"
+      return 0
+    fi
+  fi
+  _said=$(api_said "$(api POST "/containers/$_hi/start" 2>&1 || true)")
+  if [ -n "$_said" ]; then
+    HEAL_MSG="$_hcut and the previous $RECREATE_NOUN could not be started again ($_said)"
+    log "$HEAL_MSG"
+    return 0
+  fi
+  HEAL_BACK=1
+  HEAL_MSG="$_hcut: the previous $RECREATE_NOUN was put back and runs again"
+  log "$HEAL_MSG"
+  swap_unmark
+  return 0
+}
+
 # recreate_container NAME NEW_IMAGE [DIGEST] - the full pull -> clone-config recreate -> verify ->
 # rollback dance. Returns 0 on success, or 1 with RECREATE_ERR set (and the previous container
-# restored). With a DIGEST, the pull must resolve to it (see pull_verified).
+# restored). With a DIGEST, the pull must resolve to it (see pull_verified). The note of a swap in
+# hand (swap_mark) is gone when this returns, whichever way it ended.
 recreate_container() {
+  if _recreate_container "$@"; then _rcrc=0; else _rcrc=1; fi
+  swap_unmark
+  return "$_rcrc"
+}
+
+_recreate_container() {
   NAME="$1"; NEW_IMAGE="$2"; EXPECT_DIGEST="${3:-}"
   if ! valid_tag "$(image_tag "$NEW_IMAGE")"; then
     RECREATE_ERR="refusing image reference '$NEW_IMAGE': not a valid tag"
@@ -440,6 +539,9 @@ recreate_container() {
   }
 
   progress "recreating $NAME on $NEW_IMAGE"
+  # From here until this ends the container is not running: the note says so, should we not get
+  # to the end (see swap_heal).
+  swap_mark "$NAME" "$(printf '%s' "$INSPECT" | jq -r '.Id // empty' 2>/dev/null || true)" "$NEW_IMAGE"
   api POST "/containers/$NAME/stop?t=15" >/dev/null 2>&1 || true
   # Rename and start answer with nothing when they work: any answer is the reason they didn't.
   _said=$(api_said "$(api POST "/containers/$NAME/rename?name=${NAME}_old" 2>&1 || true)")

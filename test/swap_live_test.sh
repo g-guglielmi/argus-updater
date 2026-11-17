@@ -142,5 +142,51 @@ has   "Docker's words name the program that isn't there" "$(printf '%s\n' "$OUT"
 untouched
 check "no ${T}_old stays behind"   "$(there "${T}_old")" no
 
+# --- a swap that was cut short ---------------------------------------------------------------
+# The state a power cut leaves is made by hand, with the note the swap would have left (the
+# container's real id); then the updater's own swap_heal runs against the real Engine.
+# heal NOTED_ID - sets OUT to what it logged and said.
+heal() {
+  OUT=$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e NOTED="$1" -e T="$T" -e TO="$REPO:2" \
+    --entrypoint sh "$IMG" -c '
+      . /usr/local/lib/argus-updater/lib/recreate.sh
+      log() { echo "argus-updater[test]: $*"; }
+      swap_mark "$T" "$NOTED" "$TO"
+      swap_heal
+      echo "HEALED=$HEALED BACK=$HEAL_BACK"
+      if [ -f "$SWAP_MARK" ]; then echo "NOTE=there"; else echo "NOTE=gone"; fi
+    ' 2>&1)
+  printf '%s\n' "$OUT" | sed 's/^/    | /'
+}
+back() {
+  has   "it says it put the container back" "$OUT" "the previous container was put back and runs again"
+  has   "healed, and the note is gone"      "$OUT" "HEALED=1 BACK=1"
+  has   "the note is gone"                  "$OUT" "NOTE=gone"
+  untouched
+  check "no ${T}_old stays behind"          "$(there "${T}_old")" no
+}
+
+echo "cut before the rename (the container stopped, still under its name): started again"
+fresh; docker stop "$T" >/dev/null; heal "$ID0"
+back
+
+echo "cut after the rename (the container parked, nothing under its name): its name back, started"
+fresh; docker stop "$T" >/dev/null; docker rename "$T" "${T}_old"; heal "$ID0"
+back
+
+echo "cut after the create (the new one never started): the new one goes, the old one is back"
+fresh; docker stop "$T" >/dev/null; docker rename "$T" "${T}_old"; docker create --name "$T" "$REPO:2" >/dev/null; heal "$ID0"
+back
+
+echo "cut during the health check (the new one runs, unchecked): the new one goes, the old one is back"
+fresh; docker stop "$T" >/dev/null; docker rename "$T" "${T}_old"; docker run -d --name "$T" "$REPO:2" >/dev/null; heal "$ID0"
+back
+
+echo "the swap had ended and only the note stayed: nothing changes"
+fresh; heal 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+has   "nothing to tell"   "$OUT" "HEALED=0"
+has   "the note is gone"  "$OUT" "NOTE=gone"
+untouched
+
 if [ "$fail" = 0 ]; then echo "PASS"; else echo "FAILED"; fi
 exit $fail

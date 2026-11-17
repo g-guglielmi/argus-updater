@@ -130,6 +130,14 @@ container as `<name>_old` until the new one is healthy: one left there by an upd
 (not running, the same image at whatever version) is removed before the next swap; one that runs or
 is another image is not touched, and the update is refused with that as the reason.
 
+**A swap that was cut short.** A power cut in the middle of a swap leaves the container stopped or
+parked, and Docker does not start it again by itself. Before it stops anything the swap writes a
+note (`/tmp/argus-updater.swap` in the updater's container: the container's name and id, the image
+it was going to) and removes it when it ends. A note still there on the next round means the swap
+never ended: the updater puts the previous container back, starts it, and says so (the proxy's
+update reads failed on the Updates page, with that as the reason; the update is then tried again).
+This covers the proxy (probe-watch) and the core (core mode), not an updater's own update.
+
 **probe-watch** - run one alongside each proxy (the proxy needs **no** socket):
 
 ```bash

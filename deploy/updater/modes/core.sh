@@ -249,8 +249,13 @@ report_core_image   # tell the core its running tag/channel right away, before t
 report_updater      # ...and our own sidecar version
 check_self_update   # ...and how a self-update of ours ended, when we are its result
 LAST_ID=""
+CUT_MSG=""
 while true; do
   heartbeat $((INTERVAL * 3 + 1800))   # a round may include a whole update
+  # A swap of the core that never ended (a power cut in the middle, or we were stopped): put the
+  # core back first. What happened goes into that update's status below.
+  swap_heal
+  if [ "$HEALED" = "1" ]; then CUT_MSG="$HEAL_MSG"; fi
   report_core_image   # keep the core's channel signal current (tracks a recreate / redeploy)
   sync_collectors     # the core host's Zabbix runs the running image's collectors
   sync_host_tools     # the core host runs the running image's scripts and units
@@ -275,7 +280,8 @@ while true; do
       elif [ "$PRIOR_STATE" = "running" ]; then
         # We crashed mid-update; don't blindly re-run. Flag it so an admin can verify + retry.
         STARTED_AT=$(now)
-        write_status failed "the updater restarted during an update; please verify the core version and retry" "$(now)"
+        write_status failed "${CUT_MSG:-the updater restarted during an update; please verify the core version and retry}" "$(now)"
+        CUT_MSG=""
         LAST_ID="$ID"
       elif [ -z "$TAG" ] || ! valid_tag "$TAG"; then
         log "request $ID has no usable tag - ignoring"
