@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.26] - 2026-11-17
+
 ### Fixed
 - **A probe on arm64 (a Raspberry Pi, a NanoPi) can update again.** The arm64 image carried the
   x86 build of `cosign`, the tool that checks an image's signature, so a sidecar there could not
