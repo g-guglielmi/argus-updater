@@ -13,6 +13,14 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+### Changed
+- **The swap is tested against a real Docker Engine on every pull request.** The unit test fakes the
+  Engine API, so it could not show what Docker really answers. `test/swap_live_test.sh` runs the
+  image the pull request has just built against a throwaway container: a swap that works, a leftover
+  `<name>_old` removed (never started, or stopped), one refused (it runs, or is another image) with
+  nothing touched, and a new image Docker cannot start, rolled back with Docker's own words. No
+  change to the image.
+
 ## [0.2.28] - 2026-11-17
 
 ### Fixed

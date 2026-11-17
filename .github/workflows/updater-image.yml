@@ -21,6 +21,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/updater/**'
+      - 'test/**'
       - '.github/workflows/updater-image.yml'
   workflow_dispatch:
 
@@ -104,6 +105,10 @@ jobs:
             sh -n /usr/local/bin/argus-updater
             for f in /usr/local/lib/argus-updater/lib/*.sh /usr/local/lib/argus-updater/modes/*.sh /app/healthcheck.sh; do sh -n "$f"; done
           '
+      # The unit tests fake the Engine API; this one lets the image just built swap a throwaway
+      # container on the runner's own Docker, so what Docker really answers is seen too.
+      - name: The swap against a real Docker Engine
+        run: bash test/swap_live_test.sh argus-updater:pr
 
   docker:
     if: github.event_name != 'pull_request'
