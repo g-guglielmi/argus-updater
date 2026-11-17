@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-11-17
+
 ### Fixed
 - **A swap the Docker Engine refuses says Docker's reason.** When Docker refused to rename the old
   container, create the new one or start it, the updater rolled back but reported only the step
