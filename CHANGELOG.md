@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.30] - 2026-11-17
+
 ### Added
 - **A swap a power cut interrupted is put back.** The swap stops the running container, parks it,
   then creates and starts the new one. A power cut (or the updater stopped) in the middle left
