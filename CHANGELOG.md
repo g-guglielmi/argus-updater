@@ -13,6 +13,8 @@ without a Release; collect those changes under **Unreleased** until the next tag
 
 ## [Unreleased]
 
+## [0.2.27] - 2026-11-17
+
 ### Added
 - **A probe's sidecar tells Argus why an update didn't take.** When it refuses an image (the pull
   failed, the digest or the signature didn't check) or rolls one back (the new version didn't start
